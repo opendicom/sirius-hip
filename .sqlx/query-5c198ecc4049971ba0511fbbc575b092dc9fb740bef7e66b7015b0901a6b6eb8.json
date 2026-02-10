@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT patient_id.pk FROM patient_id WHERE patient_id.pat_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pk",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL | PRIMARY_KEY | AUTO_INCREMENT",
+          "char_set": 63,
+          "max_size": 20
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5c198ecc4049971ba0511fbbc575b092dc9fb740bef7e66b7015b0901a6b6eb8"
+}

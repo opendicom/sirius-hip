@@ -1,0 +1,134 @@
+# ---------------------------------------------------------------------------
+# -- GENERAL ----------------------------------------------------------------
+loglevel = "debug,hyper=info,reqwest=info,actix_web=info"
+
+# Default limit number of records to query if not specified by `max` param in request
+max_default = 2000
+
+# Cors allowed origins
+cors_whitelist=["http://localhost:3000"]
+#cors_whitelist=["http://localhost:5001", "http://192.168.1.3:5080"]
+
+# Optional
+# App database connection
+# Required only for features that need an application database
+# Example: Storing one-time tokens for JWT authorization
+# THIS DATABASE IS INDEPENDENT OF THE BACKEND PACS DATABASE
+# It will create the necessary tables automatically if they do not exist:
+# - HIP_sessions
+# - HIP_session_files
+app_database_url = "mysql://pacs:pacs@localhost:3306/pacsdb"
+# Optional
+# App Database maximum connection limit
+app_database_max_connections = 20
+
+
+# ---------------------------------------------------------------------------
+# -- JWT AUTHORIZATION ------------------------------------------------------
+# JWT Authorization configuration
+# Type of JWT authorization to use
+# Options:
+# - none:       No JWT authorization
+# - standard:   Standard JWT authorization, only verifies the token signature and expiration
+# - onetime:    One time download session. This method, creates an application session in the 
+#               application database and used to track the download progress of the studies 
+#               requested with that token ensuring that these studies can be downloaded only once.
+jwt_auth = "none" 
+jwt_secret = "secret"
+jwt_algorithm = "HS256"
+
+
+# ---------------------------------------------------------------------------
+# -- ONETIME CLEANUP --------------------------------------------------------
+# Background cleanup of OneTime persistence in the app DB (MySQL).
+# Deletes sessions/tokens only after they are safely past expiration.
+[onetime_cleanup]
+enabled = true
+# Run cleanup every N seconds
+interval_secs = 300
+# Keep data for N hours after `expires_at`
+retention_hours = 24
+# Limits per run (batched to avoid large delete bursts)
+session_batch = 200
+max_batches = 20
+token_delete_limit = 5000
+# Startup jitter to desynchronize multiple instances behind a load balancer
+initial_jitter_max_secs = 60
+
+
+# ---------------------------------------------------------------------------
+# -- BACKEND PACS -----------------------------------------------------------
+[dicomarchive]
+# Required
+# TODO: Describe [dcm4chee2183, dcm4chee440]
+version = "dcm4chee440"
+
+database_url = "mysql://pacs:pacs@localhost:3306/pacsdb"
+# Database maximum connection limit
+database_max_connections = 40
+
+# Optional
+# Required only for [html5dicom](https://github.com/opendicom/html5)
+# TODO: Describe
+custodianoid = "CUSTODIAN_OID" # OID
+
+# Optional
+# Required only for [html5dicom](https://github.com/opendicom/html5)
+# TODO: Describe
+pacsoid = "PACS_OID" # OID
+
+# Optional
+# Required only for [html5dicom](https://github.com/opendicom/html5)
+# TODO: Describe
+pacsaet = "DCM4CHEE" #AET
+
+# Required
+# Wado URL to the upstream PACS. Internal use
+# For dcm4chee-4.0.0    http://<ip>:<port>/dcm4chee-arc/wado/DCM4CHEE
+# For dcm4chee-2.18.3   http://<ip>:<port>/wado
+wadouri= "http://localhost:8080/dcm4chee-arc/wado/DCM4CHEE"
+
+# Optional
+# Base url to build the manifests. It is used to generate the wado url for download the images.
+# If not set, default value is the requested server base url (schema://host:port)
+# This value can be overridden from request URL with the parameter proxyURI
+# From highest to lowest, the order of precedence is proxyURI(URL) -> manifest_base_url(Configuration) -> server_base_url(default)
+#manifest_base_url="http://manifest_base_url.com/wado"
+
+# Required
+# Transfer syntax to configure in the manifest for retrive images from wado.
+transfer_syntax="1.2.840.10008.1.2.1" # Explicit VR Little Endian
+
+# Optional
+# Sets how to get the number of frames in an instance
+# The default behavior for a multi-frame instance is to look in the database field instance.ins_attrs and parse binary data stored there.
+# By setting number_frames_field Sirius HIP will search in that database field
+#number_frames_field = "inst_custom1"
+
+# Optional
+# Sets the field of the database study table where the value of the institution is obtained
+# If not set no institution filter is performed despite the url query parameter.
+# If set, the value is searched in that database field
+# Example: "study_custom1"
+#institution_field = "study.study_custom1"
+
+# Optional
+# DICOM metadata overrides.
+#
+# Format:
+# metadata_overrides = [
+#   { keyword = "PatientID", source = "patient.pat_id", dataset = false },
+#   { keyword = "StudyDescription", source = "study.study_custom1", dataset = false },
+# ]
+#
+# `source` MUST be `table.column`.
+# `dataset=true` means the column contains a DICOM dataset blob; the keyword is extracted by parsing it.
+
+# Dicom Zip
+#buffer = 4096
+
+# FileSystem Mappings
+filesystems = [ 
+                { id = 1, path = "/DICOM/fs1" },
+                { id = 2, path = "/DICOM/fs2" }
+              ] 

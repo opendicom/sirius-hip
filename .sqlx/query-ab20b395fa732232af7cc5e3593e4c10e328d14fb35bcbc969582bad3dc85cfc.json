@@ -1,0 +1,25 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                    SELECT patient_id.pat_id \n                    FROM patient_id \n                    WHERE patient_fk = ? LIMIT 1 ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pat_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "char_set": 224,
+          "max_size": 1020
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ab20b395fa732232af7cc5e3593e4c10e328d14fb35bcbc969582bad3dc85cfc"
+}

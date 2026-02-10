@@ -1,0 +1,73 @@
+version: '3'
+services:
+  opendicom_pacs_db:
+    container_name: opendicom_pacs_db
+    image: mysql:5.7
+    env_file:
+      - ./docker-compose.env
+      - ./docker-compose.dev.env
+    restart: unless-stopped
+    volumes:
+        - ./service_pacs/database/data:/var/lib/mysql
+        - ./service_pacs/database/entrypoint:/docker-entrypoint-initdb.d/
+    ports:
+      - 0.0.0.0:53306:3306
+    networks:
+      - opendicom_net
+
+  opendicom_pacs:
+    container_name: opendicom_pacs
+    image: opendicom/dcm4chee:latest
+    env_file:
+      - ./docker-compose.env
+      - ./docker-compose.dev.env
+    restart: unless-stopped
+    depends_on:
+      - opendicom_pacs_db
+    volumes:
+      - ./service_pacs/default/:/opt/dcm4chee/server/default/
+      - ./service_pacs/archive/:/archive/
+    ports:
+      - 0.0.0.0:58080:8080
+      - 0.0.0.0:51112:11112
+      - 0.0.0.0:52575:2575
+    logging:
+      driver: json-file
+      options:
+        max-size: 100k
+        max-file: "1"
+    networks:
+      - opendicom_net
+
+  opendicom_ohif:
+    image: ohif/app:v3.7.0
+    container_name: opendicom_ohif
+    depends_on:
+      - opendicom_pacs
+    volumes:
+      - ./service_ohif/app-config.js:/usr/share/nginx/html/app-config.js
+    ports:
+      - 5000:80
+  
+  # opendicom_sirius_hip:
+  #   container_name: opendicom_sirius_hip
+  #   image: opendicom/sirius-hip:latest
+  #   env_file:
+  #     - ./docker-compose.env
+  #     - ./docker-compose.dev.env
+  #   volumes:
+  #     - ./service_pacs/archive/:/DICOM/archive/
+  #   ports:
+  #     - 0.0.0.0:5001:5001
+  #     - 0.0.0.0:5002:80
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: 100k
+  #       max-file: "1"
+  #   networks:
+  #     - opendicom_net
+
+networks:
+  opendicom_net:
+    name: opendicom_net

@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'sirius-hip'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=sirius-hip",
+                    "--package=sirius-hip"
+                ],
+                "filter": {
+                    "name": "sirius-hip",
+                    "kind": "bin"
+                }
+            },
+            "args": ["-b", "0.0.0.0:21114", "-c", "sirius-hip.dev.toml"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'sirius-hip'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=sirius-hip",
+                    "--package=sirius-hip"
+                ],
+                "filter": {
+                    "name": "sirius-hip",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

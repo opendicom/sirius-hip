@@ -1,0 +1,7 @@
+FROM  rockylinux:8.7
+
+RUN dnf install -y \
+    openssl-devel \
+    gcc && \
+    curl https://sh.rustup.rs -sSf | sh -s -- -y
+

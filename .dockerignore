@@ -1,0 +1,12 @@
+.git
+.gitignore
+.vscode
+.Dockerfile
+.TODO.txt
+doc/
+target/
+docker/service_pacs/default/
+docker/service_pacs/archive/
+docker/service_pacs/database/data
+sirius-hip.dev.toml
+sirius-hip.dev440.toml

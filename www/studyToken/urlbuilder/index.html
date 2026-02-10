@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <title>Sirius HIP - studyToken url builder</title>
+    <link href="bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link href="main.css" rel="stylesheet">  
+    <script src="bootstrap/js/color-modes.js"></script>
+    <script src="main.js"></script>
+  </head>
+  <body>
+    <!-- Navigation bar -------------------------------------------------------------------------------->
+
+    <!-- Change color mode --------------------------------------------------------------------------------------------------->
+    <svg xmlns="http://www.w3.org/2000/svg" class="d-none">
+      <symbol id="check2" viewBox="0 0 16 16">
+        <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+      </symbol>
+      <symbol id="circle-half" viewBox="0 0 16 16">
+        <path d="M8 15A7 7 0 1 0 8 1v14zm0 1A8 8 0 1 1 8 0a8 8 0 0 1 0 16z"/>
+      </symbol>
+      <symbol id="moon-stars-fill" viewBox="0 0 16 16">
+        <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
+        <path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.156 1.156 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.156 1.156 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732L13.863.1z"/>
+      </symbol>
+      <symbol id="sun-fill" viewBox="0 0 16 16">
+        <path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/>
+      </symbol>
+    </svg>
+    <!-------------------------------------------------------------------------------------------------------------------------------->
+
+    
+    <nav class="navbar navbar-expand-lg bg-body-tertiary">
+       <div class="container-fluid">
+        <a class="navbar-brand" href="#">
+          <img src="logo.png" alt="Logo" width="40" class="d-inline-block">
+          Sirius HIP - studyToken url builder
+        </a>
+      </div>
+
+      <div class="d-flex flex-row-reverse">
+        <div class="p-2">
+          
+          <div class="dropdown bd-mode-toggle">
+            <button class="btn btn-link nav-link py-2 px-0 px-lg-2 dropdown-toggle d-flex align-items-center"
+                    id="bd-theme"
+                    type="button"
+                    aria-expanded="false"
+                    data-bs-toggle="dropdown"
+                    aria-label="Toggle theme (auto)">
+              <svg class="bi my-1 theme-icon-active" width="1em" height="1em"><use href="#circle-half"></use></svg>
+              <span class="visually-hidden" id="bd-theme-text">Toggle theme</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="bd-theme-text">
+              <li>
+                <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="light" aria-pressed="false">
+                  <svg class="bi me-2 opacity-50 theme-icon" width="1em" height="1em"><use href="#sun-fill"></use></svg>
+                  Light
+                  <svg class="bi ms-auto d-none" width="1em" height="1em"><use href="#check2"></use></svg>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="dark" aria-pressed="false">
+                  <svg class="bi me-2 opacity-50 theme-icon" width="1em" height="1em"><use href="#moon-stars-fill"></use></svg>
+                  Dark
+                  <svg class="bi ms-auto d-none" width="1em" height="1em"><use href="#check2"></use></svg>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item d-flex align-items-center active" data-bs-theme-value="auto" aria-pressed="true">
+                  <svg class="bi me-2 opacity-50 theme-icon" width="1em" height="1em"><use href="#circle-half"></use></svg>
+                  Auto
+                  <svg class="bi ms-auto d-none" width="1em" height="1em"><use href="#check2"></use></svg>
+                </button>
+              </li>
+            </ul>
+            
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    
+    
+    <div class="container-fluid mx-4 py-4 w-auto">
+      <p>
+        <b>Sirius HIP - studyToken url builder</b> is a tool to help you build and test the different options provided by this method.
+        Keep in mind that Sirius HIP must be previously configured correctly as well as the different viewers that use it such as 
+        OHIF, Weasis or OsiriX. If you are trying to configure Sirius HIP or any Dicom Viewer for the first time, please go to
+        the configuration section in the online documentation.
+      </p>
+      <p>
+        Options allowed to test:
+        <ul>
+          <li>Custom filters for study seleccion like <code>SOPClassOff, ModalityOff</code>, etc.</li>
+          <li>Download requested study in a zip archive built on the fly.</li>
+          <li>Launch OHIF Dicom Viewer to view the requested study, serie or instance.</li>
+          <li>Launch Weasis Dicom Viewer to view the requested study, serie or instance.</li>
+          <li>Launch OsiriX Dicom Viewer to view the requested study, serie or instance.</li>
+        </ul>
+      </p>
+    </div>
+
+    <div class="container-fluid border rounded mx-4 w-auto mb-5">
+      <table class="table table-hover ">
+        <thead>
+          <tr>
+            <th colspan="3" scope="col">Runtime settings</th>
+          </tr>
+        </thead>
+        <tbody class="table-group-divider">
+          <tr>
+            <td>Sirius HIP host</td>
+            <td>
+              <input id="in-SiriusHipHost" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-SiriusHipHost" >
+                    <p>Sirius HIP url. As default set to this current server
+                    </p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-SiriusHipHost" role="button" aria-expanded="false" 
+                aria-controls="collapse-SiriusHipHost"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <tr>
+            <td>OHIF host</td>
+            <td>
+              <input id="in-OhifHost" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-OhifHost" >
+                    <p>OHIF url. As default set to this current server</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-OhifHost" role="button" aria-expanded="false" 
+                aria-controls="collapse-OhifHost"
+                >Show/Hide</a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Table bar -------------------------------------------------------------------------------->
+    <div class="container-fluid border rounded mx-4 w-auto" style="margin-bottom: 10rem;">
+      <table class="table table-hover ">
+        <thead>
+          <tr>
+            <th scope="col">Parameter</th>
+            <th scope="col">Value</th>
+            <th scope="col">Description</th>
+          </tr>
+        </thead>
+        <tbody class="table-group-divider" >
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td class="col-sm-1" >accessType</td>
+            <td class="col-sm-3" >
+              <select id="in-accessType" class="form-select" aria-label="Default select example">
+                <option value="ohif" selected>OHIF</option>
+                <option value="weasis.xml">Weasis</option>
+                <option value="dicom.zip">Dicom zip</option>
+                <option value="osirix">Osirix/Horos</option>
+              </select>
+            </td>
+            <td class="col-sm-4 align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-accessType" >
+                       <p>Type of response. Either a manifest to view dicom images from different viewers or a compressed file with the dicom images.</p>
+                      Available values:
+                    <ul>
+                      <li>cornerstone.json</li>
+                      <li>weasis.xml</li>
+                      <li>dicom.zip</li>
+                      <li>ohif</li>
+                    </ul>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-accessType" role="button" aria-expanded="false" 
+                aria-controls="collapse-accessType"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>token</td>
+            <td>
+              <input id="in-token" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-token" >
+                    <p>Token for external sofware interoperability.
+                    <br />If Sirius HIP is configured to use JWT Authorization, this token must be compose by the external entity and shared to Sirius HIP in all the requests, Sirius HIP will response only if the token is valid.
+                    <br />External entity must build this token as folow:
+                    <br>
+                    <code>{ "aud": "sirius-hip", "exp": TIMESTAMP }</code>
+                    <br />
+                    <ul>
+                      <li><b>Algorithm:</b> Same as Sirius HIP configuration</li>
+                      <li><b>Secret key:</b> Same as Sirius HIP configuration</li>
+                    </ul>
+                  </p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-token" role="button" aria-expanded="false" 
+                aria-controls="collapse-token"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>session</td>
+            <td>
+              <input id="in-session" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-session" >
+                    <p>Session token used for external sofware interoperability.
+                      <br>
+                      External entity session validation. This parameter is added in every response. So the calling entity can validate the session handed by it.
+                    </p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-session" role="button" aria-expanded="false" 
+                aria-controls="collapse-session"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>proxyURI</td>
+            <td>
+              <input id="in-proxyURI" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-proxyURI" >
+                    <p>If configured, use this url as the base url for downloading the images from the manifest. 
+                      <br>Otherwise, use the Sirius HIP base URL
+                    </p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-proxyURI" role="button" aria-expanded="false" 
+                aria-controls="collapse-proxyURI"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>AccessionNumber</td>
+            <td>
+              <input id="in-AccessionNumber" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-AccessionNumber" >
+                    <p>Accession number. Dicom tag (0008,0050)</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-AccessionNumber" role="button" aria-expanded="false" 
+                aria-controls="collapse-AccessionNumber"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>PatientID</td>
+            <td>
+              <input id="in-PatientID" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-PatientID" >
+                    <p>Patient ID. Dicom tag (0010,0020)</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-PatientID" role="button" aria-expanded="false" 
+                aria-controls="collapse-PatientID"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>patient</td>
+            <td>
+              <input id="in-patient" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-patient" >
+                    <p>Patient Name. Dicom Tag (0010,0010)</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-patient" role="button" aria-expanded="false" 
+                aria-controls="collapse-patient"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>StudyInstanceUID</td>
+            <td>
+              <input id="in-StudyInstanceUID" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-StudyInstanceUID" >
+                    <p>List of Studies instance UID Dicom tag (0020,000D) to search.
+                    <p>Separated by <code>"\"</code> (back slash)</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-StudyInstanceUID" role="button" aria-expanded="false" 
+                aria-controls="collapse-StudyInstanceUID"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          
+
+          
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>StudyID</td>
+            <td>
+              <input id="in-StudyID" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-StudyID" >
+                    <p>StudyID. Dicom Tag (0020,0010) </p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-StudyID" role="button" aria-expanded="false" 
+                aria-controls="collapse-StudyID"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>StudyDate</td>
+            <td>
+              <input id="in-StudyDate" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-StudyDate" >
+                    Study date, *Dicom tag (0008,0020)
+                      <br>
+                      Allowed format:
+                      <ul>
+                        <li><code>AAAA-MM-DD</code></li>
+                        <li><code>AAAA-MM-DD| (>=AAA-MM-DD)</code></li>
+                        <li><code>|AAAA-MM-DD (<=AAA-MM-DD)</code></li>
+                        <li><code>AAAA-MM-DD|AAAA-MM-DD (between)</code></li>
+                      </ul>
+                  
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-StudyDate" role="button" aria-expanded="false" 
+                aria-controls="collapse-StudyDate"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>ModalityInStudy</td>
+            <td>
+              <input id="in-ModalityInStudy" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-ModalityInStudy" >
+                    <p>Modality a study must contain</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-ModalityInStudy" role="button" aria-expanded="false" 
+                aria-controls="collapse-ModalityInStudy"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>cuidsInStudy</td>
+            <td>
+              <input id="in-cuidsInStudy" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-cuidsInStudy" >
+                    <p>SOP Class OID in Study. Dicom tag (0008,0016) in study</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-cuidsInStudy" role="button" aria-expanded="false" 
+                aria-controls="collapse-cuidsInStudy"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>SeriesInstanceUID</td>
+            <td>
+              <input id="in-SeriesInstanceUID" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-SeriesInstanceUID" >
+                    List of Studies instance UID Dicom tag (0020,000E) to search.
+                    <br>Separated by <code>"\"</code> (back slash).
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-SeriesInstanceUID" role="button" aria-expanded="false" 
+                aria-controls="collapse-SeriesInstanceUID"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>SeriesDescription</td>
+            <td>
+              <input id="in-SeriesDescription" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-SeriesDescription" >
+                    Serie description. Dicom tag (0008,103E) to search
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-SeriesDescription" role="button" aria-expanded="false" 
+                aria-controls="collapse-SeriesDescription"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>SeriesNumber</td>
+            <td>
+              <input id="in-SeriesNumber" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-SeriesNumber" >
+                    Serie number. Dicom tag (0020,0011) to search.
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-SeriesNumber" role="button" aria-expanded="false" 
+                aria-controls="collapse-SeriesNumber"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>Modality</td>
+            <td>
+              <input id="in-Modality" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-Modality" >
+                    Modality of the Serie to search for.
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-Modality" role="button" aria-expanded="false" 
+                aria-controls="collapse-Modality"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>ModalityOff</td>
+            <td>
+              <input id="in-ModalityOff" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-ModalityOff" >
+                    List of Modalities to exclude in te response.
+                    <br>Separated by <code>"/" </code>(back slash).
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-ModalityOff" role="button" aria-expanded="false" 
+                aria-controls="collapse-ModalityOff"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>SOPClass</td>
+            <td>
+              <input id="in-SOPClass" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-SOPClass" >
+                    SOP Class UID of the Serie to search for
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-SOPClass" role="button" aria-expanded="false" 
+                aria-controls="collapse-SOPClass"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>SOPClassOff</td>
+            <td>
+              <input id="in-SOPClassOff" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-SOPClassOff" >
+                    List of Instance SOP Class UID to exclude in the response.
+                    <br>Separated by <code>"/"</code> (back slash).
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-SOPClassOff" role="button" aria-expanded="false" 
+                aria-controls="collapse-SOPClassOff"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>institution</td>
+            <td>
+              <input id="in-institution" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-institution" >
+                    <p>PACS OID.</p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-institution" role="button" aria-expanded="false" 
+                aria-controls="collapse-institution"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+          <!--------------------------------------------------------------------------------->
+          <tr>
+            <td>max</td>
+            <td>
+              <input id="in-max" class="form-control" type="text">
+            </td>
+            <td class="col-sm-auto align-middle"> 
+              <div class="container">
+                <div class="row">
+                  <div class="col collapse multi-collapse" id="collapse-max" >
+                    <p>Maximum number of images query by request:</p>
+                    <p>Default value: <code>2000</code></p>
+                  </div>
+                </div> 
+              </div>
+              <a class="btn btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" href="#collapse-max" role="button" aria-expanded="false" 
+                aria-controls="collapse-max"
+                >Show/Hide</a>
+            </td>
+          </tr>
+
+
+          <!-- Show all -->
+          <tr>
+            <td></td>
+            <td></td>
+            <td class="col-sm-auto align-middle">
+              <button 
+                class="btn btn btn-outline-secondary btn-sm" 
+                type="button" 
+                data-bs-toggle="collapse" 
+                data-bs-target=".multi-collapse" 
+                aria-expanded="false" 
+                aria-controls="collapse-accessType 
+                               collapse-token
+                               collapse-session
+                               collapse-institution
+                               collapse-max
+                               collapse-StudyInstanceUID
+                               collapse-AccessionNumber
+                               collapse-PatientID
+                               collapse-patient
+                               collapse-StudyID
+                               collapse-StudyDate
+                               collapse-ModalityInStudy
+                               collapse-cuidsInStudy
+                               collapse-SeriesInstanceUID
+                               collapse-SeriesNumber
+                               collapse-Modality
+                               collapse-ModalityOff
+                               collapse-SOPClass
+                               "
+                >
+                Show/Hide all
+              </button>
+               
+            </td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <nav class="navbar fixed-bottom bg-body-tertiary p-3">
+      <div class="container-fluid">
+        <div class="input-group mb-3 pt-2">
+          <button id="btn-launch-sirius-hip" type="button" class="btn btn-bd-primary" title="Open Sirius HIP URL">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-rocket-takeoff me-2" viewBox="0 0 16 16">
+              <path d="M9.752 6.193c.599.6 1.73.437 2.528-.362s.96-1.932.362-2.531c-.599-.6-1.73-.438-2.528.361-.798.8-.96 1.933-.362 2.532"/>
+              <path d="M15.811 3.312c-.363 1.534-1.334 3.626-3.64 6.218l-.24 2.408a2.56 2.56 0 0 1-.732 1.526L8.817 15.85a.51.51 0 0 1-.867-.434l.27-1.899c.04-.28-.013-.593-.131-.956a9 9 0 0 0-.249-.657l-.082-.202c-.815-.197-1.578-.662-2.191-1.277-.614-.615-1.079-1.379-1.275-2.195l-.203-.083a10 10 0 0 0-.655-.248c-.363-.119-.675-.172-.955-.132l-1.896.27A.51.51 0 0 1 .15 7.17l2.382-2.386c.41-.41.947-.67 1.524-.734h.006l2.4-.238C9.005 1.55 11.087.582 12.623.208c.89-.217 1.59-.232 2.08-.188.244.023.435.06.57.093q.1.026.16.045c.184.06.279.13.351.295l.029.073a3.5 3.5 0 0 1 .157.721c.055.485.051 1.178-.159 2.065m-4.828 7.475.04-.04-.107 1.081a1.54 1.54 0 0 1-.44.913l-1.298 1.3.054-.38c.072-.506-.034-.993-.172-1.418a9 9 0 0 0-.164-.45c.738-.065 1.462-.38 2.087-1.006M5.205 5c-.625.626-.94 1.351-1.004 2.09a9 9 0 0 0-.45-.164c-.424-.138-.91-.244-1.416-.172l-.38.054 1.3-1.3c.245-.246.566-.401.91-.44l1.08-.107zm9.406-3.961c-.38-.034-.967-.027-1.746.163-1.558.38-3.917 1.496-6.937 4.521-.62.62-.799 1.34-.687 2.051.107.676.483 1.362 1.048 1.928.564.565 1.25.941 1.924 1.049.71.112 1.429-.067 2.048-.688 3.079-3.083 4.192-5.444 4.556-6.987.183-.771.18-1.345.138-1.713a3 3 0 0 0-.045-.283 3 3 0 0 0-.3-.041Z"/>
+              <path d="M7.009 12.139a7.6 7.6 0 0 1-1.804-1.352A7.6 7.6 0 0 1 3.794 8.86c-1.102.992-1.965 5.054-1.839 5.18.125.126 3.936-.896 5.054-1.902Z"/>
+            </svg>
+            Launch
+          </button>
+          <button id="btn-copy-sirius-hip" type="button" class="btn btn-outline-secondary" aria-label="Copy Sirius HIP URL" title="Copy Sirius HIP URL">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-copy" viewBox="0 0 16 16">
+              <path fill-rule="evenodd" d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1z"/>
+            </svg>
+          </button>
+          <span class="input-group-text" id="basic-addon-sirius-hip" style="width: 7em;">Sirius HIP URL:</span>
+          <input id="sirius-hip-url" type="text" class="form-control" aria-describedby="basic-addon-sirius-hip" readonly>
+        </div>
+
+        <div class="input-group mb-0 pt-2">
+          <button id="btn-launch-url" type="button" class="btn btn-bd-primary" title="Open URL">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-rocket-takeoff me-2" viewBox="0 0 16 16">
+              <path d="M9.752 6.193c.599.6 1.73.437 2.528-.362s.96-1.932.362-2.531c-.599-.6-1.73-.438-2.528.361-.798.8-.96 1.933-.362 2.532"/>
+              <path d="M15.811 3.312c-.363 1.534-1.334 3.626-3.64 6.218l-.24 2.408a2.56 2.56 0 0 1-.732 1.526L8.817 15.85a.51.51 0 0 1-.867-.434l.27-1.899c.04-.28-.013-.593-.131-.956a9 9 0 0 0-.249-.657l-.082-.202c-.815-.197-1.578-.662-2.191-1.277-.614-.615-1.079-1.379-1.275-2.195l-.203-.083a10 10 0 0 0-.655-.248c-.363-.119-.675-.172-.955-.132l-1.896.27A.51.51 0 0 1 .15 7.17l2.382-2.386c.41-.41.947-.67 1.524-.734h.006l2.4-.238C9.005 1.55 11.087.582 12.623.208c.89-.217 1.59-.232 2.08-.188.244.023.435.06.57.093q.1.026.16.045c.184.06.279.13.351.295l.029.073a3.5 3.5 0 0 1 .157.721c.055.485.051 1.178-.159 2.065m-4.828 7.475.04-.04-.107 1.081a1.54 1.54 0 0 1-.44.913l-1.298 1.3.054-.38c.072-.506-.034-.993-.172-1.418a9 9 0 0 0-.164-.45c.738-.065 1.462-.38 2.087-1.006M5.205 5c-.625.626-.94 1.351-1.004 2.09a9 9 0 0 0-.45-.164c-.424-.138-.91-.244-1.416-.172l-.38.054 1.3-1.3c.245-.246.566-.401.91-.44l1.08-.107zm9.406-3.961c-.38-.034-.967-.027-1.746.163-1.558.38-3.917 1.496-6.937 4.521-.62.62-.799 1.34-.687 2.051.107.676.483 1.362 1.048 1.928.564.565 1.25.941 1.924 1.049.71.112 1.429-.067 2.048-.688 3.079-3.083 4.192-5.444 4.556-6.987.183-.771.18-1.345.138-1.713a3 3 0 0 0-.045-.283 3 3 0 0 0-.3-.041Z"/>
+              <path d="M7.009 12.139a7.6 7.6 0 0 1-1.804-1.352A7.6 7.6 0 0 1 3.794 8.86c-1.102.992-1.965 5.054-1.839 5.18.125.126 3.936-.896 5.054-1.902Z"/>
+            </svg>
+            Launch
+          </button>
+          <button id="btn-copy-url" type="button" class="btn btn-outline-secondary" aria-label="Copy URL" title="Copy URL">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-copy" viewBox="0 0 16 16">
+              <path fill-rule="evenodd" d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1z"/>
+            </svg>
+          </button>
+          <span class="input-group-text" id="basic-addon1" style="width: 7em;">Final URL:</span>
+          <input id="url" type="text" class="form-control" aria-describedby="basic-addon1" readonly>
+        </div>
+      </div>
+    </nav>
+
+    <script src="bootstrap/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
+
