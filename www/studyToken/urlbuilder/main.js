@@ -57,6 +57,235 @@ function flashCopied(btn) {
     }, 900);
 }
 
+function setValidationAlert(messages) {
+    var alertEl = document.getElementById("validation-alert");
+    if (!alertEl) return;
+
+    if (!messages || messages.length === 0) {
+        alertEl.classList.add("d-none");
+        alertEl.textContent = "";
+        return;
+    }
+
+    alertEl.classList.remove("d-none");
+    alertEl.textContent = messages.join("  ");
+}
+
+function setFieldValidState(id, errorMessage) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!errorMessage) {
+        el.classList.remove("is-invalid");
+        el.removeAttribute("aria-invalid");
+        el.removeAttribute("title");
+        return;
+    }
+    el.classList.add("is-invalid");
+    el.setAttribute("aria-invalid", "true");
+    el.setAttribute("title", errorMessage);
+}
+
+function splitBackslashList(raw) {
+    var value = (raw || "").trim();
+    if (!value) return [];
+    return value
+        .split("\\")
+        .map(function (x) { return (x || "").trim(); })
+        .filter(function (x) { return !!x; });
+}
+
+function isValidUidToken(token) {
+    // DICOM UID / OID practical validator: digits and dots, non-empty.
+    // (Does not enforce full UID rules; keeps client-side validation forgiving.)
+    return /^[0-9]+(\.[0-9]+)*$/.test(token);
+}
+
+function isValidModalityToken(token) {
+    return /^[A-Za-z0-9]{1,16}$/.test(token);
+}
+
+function isValidStudyDate(raw) {
+    // Accept:
+    //  YYYY-MM-DD
+    //  YYYY-MM-DD|
+    //  |YYYY-MM-DD
+    //  YYYY-MM-DD|YYYY-MM-DD
+    var value = (raw || "").trim();
+    if (!value) return true;
+
+    if (value.indexOf("|") === -1) {
+        return /^\d{4}-\d{2}-\d{2}$/.test(value);
+    }
+
+    var parts = value.split("|");
+    if (parts.length !== 2) return false;
+
+    var left = (parts[0] || "").trim();
+    var right = (parts[1] || "").trim();
+
+    var dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (left && !dateRe.test(left)) return false;
+    if (right && !dateRe.test(right)) return false;
+
+    // Disallow just "|" with both sides empty.
+    if (!left && !right) return false;
+    return true;
+}
+
+function isValidHttpUrl(raw) {
+    var value = (raw || "").trim();
+    if (!value) return true;
+    try {
+        var u = new URL(value);
+        return u.protocol === "http:" || u.protocol === "https:";
+    } catch (_e) {
+        return false;
+    }
+}
+
+function validateInputs() {
+    var errors = [];
+
+    // Clear previous invalid states
+    var idsToValidate = [
+        "in-accessType",
+        "in-proxyURI",
+        "in-max",
+        "in-StudyDate",
+        "in-StudyInstanceUID",
+        "in-SeriesInstanceUID",
+        "in-cuidsInStudy",
+        "in-Modality",
+        "in-ModalityOff",
+        "in-SOPClass",
+        "in-SOPClassOff",
+    ];
+    idsToValidate.forEach(function (id) { setFieldValidState(id, ""); });
+
+    // accessType (server accepted) vs UI-only osirix
+    var uiAccessType = readValue("in-accessType") || "ohif";
+    var serverAccessType = uiAccessType === "osirix" ? "dicom.zip" : uiAccessType;
+    var allowedAccessTypes = {
+        "ohif": true,
+        "weasis.xml": true,
+        "dicom.zip": true,
+        "cornerstone.json": true,
+    };
+    if (!allowedAccessTypes[serverAccessType]) {
+        var msg = "Invalid accessType. Allowed values: ohif, weasis.xml, dicom.zip, cornerstone.json";
+        setFieldValidState("in-accessType", msg);
+        errors.push(msg);
+    }
+
+    // proxyURI
+    var proxyURI = readValue("in-proxyURI");
+    if (proxyURI && !isValidHttpUrl(proxyURI)) {
+        var msgProxy = "proxyURI must be a valid http(s) URL (e.g. https://host:5001)";
+        setFieldValidState("in-proxyURI", msgProxy);
+        errors.push(msgProxy);
+    }
+
+    // max
+    var maxRaw = readValue("in-max");
+    if (maxRaw) {
+        if (!/^\d+$/.test(maxRaw)) {
+            var msgMax = "max must be an integer (u64)";
+            setFieldValidState("in-max", msgMax);
+            errors.push(msgMax);
+        } else if (parseInt(maxRaw, 10) <= 0) {
+            var msgMax2 = "max must be > 0 (or empty to use the default)";
+            setFieldValidState("in-max", msgMax2);
+            errors.push(msgMax2);
+        }
+    }
+
+    // StudyDate
+    var studyDate = readValue("in-StudyDate");
+    if (studyDate && !isValidStudyDate(studyDate)) {
+        var msgDate = "Invalid StudyDate. Use YYYY-MM-DD, YYYY-MM-DD|, |YYYY-MM-DD, or YYYY-MM-DD|YYYY-MM-DD";
+        setFieldValidState("in-StudyDate", msgDate);
+        errors.push(msgDate);
+    }
+
+    // UID lists and UID-like fields
+    var studyIuids = splitBackslashList(readValue("in-StudyInstanceUID"));
+    if (studyIuids.some(function (x) { return !isValidUidToken(x); })) {
+        var msgUid1 = "StudyInstanceUID must be UID(s) containing digits and dots, separated by \"\\\" (backslash)";
+        setFieldValidState("in-StudyInstanceUID", msgUid1);
+        errors.push(msgUid1);
+    }
+
+    var seriesIuids = splitBackslashList(readValue("in-SeriesInstanceUID"));
+    if (seriesIuids.some(function (x) { return !isValidUidToken(x); })) {
+        var msgUid2 = "SeriesInstanceUID must be UID(s) containing digits and dots, separated by \"\\\" (backslash)";
+        setFieldValidState("in-SeriesInstanceUID", msgUid2);
+        errors.push(msgUid2);
+    }
+
+    var cuids = splitBackslashList(readValue("in-cuidsInStudy"));
+    if (cuids.length > 0 && cuids.some(function (x) { return !isValidUidToken(x); })) {
+        var msgCuid = "cuidsInStudy must be OID/UID(s) containing digits and dots, separated by \"\\\" (backslash)";
+        setFieldValidState("in-cuidsInStudy", msgCuid);
+        errors.push(msgCuid);
+    }
+
+    var modality = readValue("in-Modality");
+    if (modality && !isValidModalityToken(modality)) {
+        var msgMod = "Invalid Modality (use a short token like CT, MR, US)";
+        setFieldValidState("in-Modality", msgMod);
+        errors.push(msgMod);
+    }
+
+    var modalityOff = splitBackslashList(readValue("in-ModalityOff"));
+    if (modalityOff.some(function (x) { return !isValidModalityToken(x); })) {
+        var msgModOff = "ModalityOff must be modality token(s) separated by \"\\\" (backslash)";
+        setFieldValidState("in-ModalityOff", msgModOff);
+        errors.push(msgModOff);
+    }
+
+    var sopClass = readValue("in-SOPClass");
+    if (sopClass && !isValidUidToken(sopClass)) {
+        var msgSop = "SOPClass must be a UID (digits and dots)";
+        setFieldValidState("in-SOPClass", msgSop);
+        errors.push(msgSop);
+    }
+
+    var sopClassOff = splitBackslashList(readValue("in-SOPClassOff"));
+    if (sopClassOff.some(function (x) { return !isValidUidToken(x); })) {
+        var msgSopOff = "SOPClassOff must be UID(s) separated by \"\\\" (backslash)";
+        setFieldValidState("in-SOPClassOff", msgSopOff);
+        errors.push(msgSopOff);
+    }
+
+    return {
+        ok: errors.length === 0,
+        messages: errors,
+    };
+}
+
+function applyValidationUi(validation) {
+    setValidationAlert(validation.messages);
+
+    var btnIds = ["btn-launch-sirius-hip", "btn-copy-sirius-hip", "btn-launch-url", "btn-copy-url"];
+    btnIds.forEach(function (id) {
+        var btn = document.getElementById(id);
+        if (btn) btn.disabled = !validation.ok;
+    });
+}
+
+function validateOrFocusFirstInvalid() {
+    var validation = validateInputs();
+    applyValidationUi(validation);
+
+    if (!validation.ok) {
+        var firstInvalid = document.querySelector(".is-invalid");
+        if (firstInvalid && typeof firstInvalid.focus === "function") {
+            firstInvalid.focus();
+        }
+    }
+    return validation.ok;
+}
+
 function buildSiriusHipUrl() {
     var protocol = window.location.protocol;
     var hostname = window.location.hostname;
@@ -143,6 +372,8 @@ function update_url() {
     var ohifHost = normalizeBaseUrl(readValue("in-OhifHost"), defaultOhifHost);
     var built = buildSiriusHipUrl();
 
+    applyValidationUi(validateInputs());
+
     var value;
     switch (built.uiAccessType) {
         case "weasis.xml":
@@ -195,6 +426,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var btnLaunchSiriusHip = document.getElementById("btn-launch-sirius-hip");
     if (btnLaunchSiriusHip) {
         btnLaunchSiriusHip.addEventListener("click", function () {
+            update_url();
+            if (!validateOrFocusFirstInvalid()) return;
             openInNewTab(readValue("sirius-hip-url"));
         });
     }
@@ -202,6 +435,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var btnCopySiriusHip = document.getElementById("btn-copy-sirius-hip");
     if (btnCopySiriusHip) {
         btnCopySiriusHip.addEventListener("click", async function () {
+            update_url();
+            if (!validateOrFocusFirstInvalid()) return;
             var ok = await copyToClipboard(readValue("sirius-hip-url"));
             if (ok) flashCopied(btnCopySiriusHip);
         });
@@ -210,6 +445,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var btnLaunchUrl = document.getElementById("btn-launch-url");
     if (btnLaunchUrl) {
         btnLaunchUrl.addEventListener("click", function () {
+            update_url();
+            if (!validateOrFocusFirstInvalid()) return;
             openInNewTab(readValue("url"));
         });
     }
@@ -217,6 +454,8 @@ document.addEventListener("DOMContentLoaded", function () {
     var btnCopyUrl = document.getElementById("btn-copy-url");
     if (btnCopyUrl) {
         btnCopyUrl.addEventListener("click", async function () {
+            update_url();
+            if (!validateOrFocusFirstInvalid()) return;
             var ok = await copyToClipboard(readValue("url"));
             if (ok) flashCopied(btnCopyUrl);
         });

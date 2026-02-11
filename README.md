@@ -5,7 +5,7 @@ Health Integration Platform for multi-PACS environments
 
 Sirius HIP is a PACS-centric integration platform that connects one or multiple PACS (including open-source PACS) with RIS and other healthcare systems.
 
-> The integration platform for Sirius PACS
+> One platform. Multiple PACS. Total integration.
 
 ## Key Features
 

@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # -- GENERAL ----------------------------------------------------------------
-loglevel = "debug,hyper=info,reqwest=info,actix_web=info"
+loglevel = "info,hyper=info,reqwest=info,actix_web=info"
 
 # Default limit number of records to query if not specified by `max` param in request
 max_default = 2000
@@ -129,6 +129,6 @@ transfer_syntax="1.2.840.10008.1.2.1" # Explicit VR Little Endian
 
 # FileSystem Mappings
 filesystems = [ 
-                { id = 1, path = "/DICOM/fs1" },
-                { id = 2, path = "/DICOM/fs2" }
-              ] 
+  { id = 1, path = "/DICOM/fs1" },
+  { id = 2, path = "/DICOM/fs2" }
+] 

@@ -94,11 +94,11 @@
       <p>
         Options allowed to test:
         <ul>
-          <li>Custom filters for study seleccion like <code>SOPClassOff, ModalityOff</code>, etc.</li>
+          <li>Custom filters for study selection like <code>SOPClassOff, ModalityOff</code>, etc.</li>
           <li>Download requested study in a zip archive built on the fly.</li>
-          <li>Launch OHIF Dicom Viewer to view the requested study, serie or instance.</li>
-          <li>Launch Weasis Dicom Viewer to view the requested study, serie or instance.</li>
-          <li>Launch OsiriX Dicom Viewer to view the requested study, serie or instance.</li>
+          <li>Launch OHIF DICOM Viewer to view the requested study, series, or instance.</li>
+          <li>Launch Weasis DICOM Viewer to view the requested study, series, or instance.</li>
+          <li>Launch OsiriX DICOM Viewer to view the requested study, series, or instance.</li>
         </ul>
       </p>
     </div>
@@ -171,6 +171,7 @@
             <td class="col-sm-3" >
               <select id="in-accessType" class="form-select" aria-label="Default select example">
                 <option value="ohif" selected>OHIF</option>
+                <option value="cornerstone.json">Cornerstone</option>
                 <option value="weasis.xml">Weasis</option>
                 <option value="dicom.zip">Dicom zip</option>
                 <option value="osirix">Osirix/Horos</option>
@@ -207,15 +208,15 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-token" >
-                    <p>Token for external sofware interoperability.
-                    <br />If Sirius HIP is configured to use JWT Authorization, this token must be compose by the external entity and shared to Sirius HIP in all the requests, Sirius HIP will response only if the token is valid.
-                    <br />External entity must build this token as folow:
+                    <p>JWT token used for interoperability/auth.
+                    <br />If Sirius HIP is configured with JWT auth, this parameter is required and must be a valid JWT.
+                    <br />Minimal claims example:
                     <br>
                     <code>{ "aud": "sirius-hip", "exp": TIMESTAMP }</code>
                     <br />
                     <ul>
-                      <li><b>Algorithm:</b> Same as Sirius HIP configuration</li>
-                      <li><b>Secret key:</b> Same as Sirius HIP configuration</li>
+                      <li><b>Algorithm:</b> same as Sirius HIP configuration</li>
+                      <li><b>Secret key:</b> same as Sirius HIP configuration</li>
                     </ul>
                   </p>
                   </div>
@@ -237,9 +238,9 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-session" >
-                    <p>Session token used for external sofware interoperability.
+                    <p>Opaque session value for interoperability.
                       <br>
-                      External entity session validation. This parameter is added in every response. So the calling entity can validate the session handed by it.
+                      This value is echoed back in the response so the caller can correlate/validate its own session.
                     </p>
                   </div>
                 </div> 
@@ -260,8 +261,9 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-proxyURI" >
-                    <p>If configured, use this url as the base url for downloading the images from the manifest. 
-                      <br>Otherwise, use the Sirius HIP base URL
+                    <p>Override base URL used inside manifests (download links).
+                      <br>Must be a valid <code>http(s)</code> URL.
+                      <br>When empty, Sirius HIP uses its own base URL.
                     </p>
                   </div>
                 </div> 
@@ -393,10 +395,10 @@
                       <br>
                       Allowed format:
                       <ul>
-                        <li><code>AAAA-MM-DD</code></li>
-                        <li><code>AAAA-MM-DD| (>=AAA-MM-DD)</code></li>
-                        <li><code>|AAAA-MM-DD (<=AAA-MM-DD)</code></li>
-                        <li><code>AAAA-MM-DD|AAAA-MM-DD (between)</code></li>
+                        <li><code>YYYY-MM-DD</code></li>
+                        <li><code>YYYY-MM-DD| (>=YYYY-MM-DD)</code></li>
+                        <li><code>|YYYY-MM-DD (<=YYYY-MM-DD)</code></li>
+                        <li><code>YYYY-MM-DD|YYYY-MM-DD (between)</code></li>
                       </ul>
                   
                   </div>
@@ -479,7 +481,7 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-SeriesDescription" >
-                    Serie description. Dicom tag (0008,103E) to search
+                    Series description. DICOM tag (0008,103E) to search
                   </div>
                 </div> 
               </div>
@@ -499,7 +501,7 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-SeriesNumber" >
-                    Serie number. Dicom tag (0020,0011) to search.
+                    Series number. DICOM tag (0020,0011) to search.
                   </div>
                 </div> 
               </div>
@@ -519,7 +521,7 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-Modality" >
-                    Modality of the Serie to search for.
+                    Modality of the series to search for.
                   </div>
                 </div> 
               </div>
@@ -539,8 +541,8 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-ModalityOff" >
-                    List of Modalities to exclude in te response.
-                    <br>Separated by <code>"/" </code>(back slash).
+                    List of modalities to exclude in the response.
+                    <br>Separated by <code>"\"</code> (back slash).
                   </div>
                 </div> 
               </div>
@@ -561,7 +563,7 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-SOPClass" >
-                    SOP Class UID of the Serie to search for
+                    SOP Class UID of the series to search for
                   </div>
                 </div> 
               </div>
@@ -582,7 +584,7 @@
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-SOPClassOff" >
                     List of Instance SOP Class UID to exclude in the response.
-                    <br>Separated by <code>"/"</code> (back slash).
+                    <br>Separated by <code>"\\"</code> (back slash).
                   </div>
                 </div> 
               </div>
@@ -602,7 +604,7 @@
               <div class="container">
                 <div class="row">
                   <div class="col collapse multi-collapse" id="collapse-institution" >
-                    <p>PACS OID.</p>
+                    <p>Logical institution/tenant identifier used for external interoperability/auth flows.</p>
                   </div>
                 </div> 
               </div>
@@ -616,7 +618,7 @@
           <tr>
             <td>max</td>
             <td>
-              <input id="in-max" class="form-control" type="text">
+              <input id="in-max" class="form-control" type="number" min="1" step="1" inputmode="numeric">
             </td>
             <td class="col-sm-auto align-middle"> 
               <div class="container">
@@ -648,8 +650,11 @@
                 aria-controls="collapse-accessType 
                                collapse-token
                                collapse-session
+                               collapse-proxyURI
                                collapse-institution
                                collapse-max
+                               collapse-SiriusHipHost
+                               collapse-OhifHost
                                collapse-StudyInstanceUID
                                collapse-AccessionNumber
                                collapse-PatientID
@@ -660,9 +665,11 @@
                                collapse-cuidsInStudy
                                collapse-SeriesInstanceUID
                                collapse-SeriesNumber
+                               collapse-SeriesDescription
                                collapse-Modality
                                collapse-ModalityOff
                                collapse-SOPClass
+                               collapse-SOPClassOff
                                "
                 >
                 Show/Hide all
@@ -676,6 +683,7 @@
     </div>
     <nav class="navbar fixed-bottom bg-body-tertiary p-3">
       <div class="container-fluid">
+        <div id="validation-alert" class="alert alert-danger py-2 mb-2 d-none" role="alert"></div>
         <div class="input-group mb-3 pt-2">
           <button id="btn-launch-sirius-hip" type="button" class="btn btn-bd-primary" title="Open Sirius HIP URL">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-rocket-takeoff me-2" viewBox="0 0 16 16">
@@ -690,7 +698,7 @@
               <path fill-rule="evenodd" d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1z"/>
             </svg>
           </button>
-          <span class="input-group-text" id="basic-addon-sirius-hip" style="width: 7em;">Sirius HIP URL:</span>
+          <span class="input-group-text" id="basic-addon-sirius-hip" style="width: 8em;">Sirius HIP URL:</span>
           <input id="sirius-hip-url" type="text" class="form-control" aria-describedby="basic-addon-sirius-hip" readonly>
         </div>
 
@@ -708,7 +716,7 @@
               <path fill-rule="evenodd" d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1z"/>
             </svg>
           </button>
-          <span class="input-group-text" id="basic-addon1" style="width: 7em;">Final URL:</span>
+          <span class="input-group-text" id="basic-addon1" style="width: 8em;">Final URL:</span>
           <input id="url" type="text" class="form-control" aria-describedby="basic-addon1" readonly>
         </div>
       </div>

@@ -3092,7 +3092,6 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "bitvec",
  "chrono",
  "clap",
  "crc32fast",

@@ -161,9 +161,12 @@ async fn main() -> anyhow::Result<()> {
 
             loop {
                 interval.tick().await;
+                // Calculate cutoff time for expired sessions.
                 let cutoff = chrono::Utc::now() - chrono::Duration::hours(retention_hours);
                 if let Err(e) = cleanup_repo.cleanup_expired(cutoff).await {
                     log::warn!("OneTime cleanup failed: {:?}", e);
+                } else {
+                    log::info!("OneTime cleanup completed successfully");
                 }
             }
         });

@@ -50,5 +50,4 @@ futures = "0.3"
 async-stream = "0.3.3"
 async-trait = "0.1.89"
 
-bitvec = "1.0.1"
 sha2 = "0.10"
