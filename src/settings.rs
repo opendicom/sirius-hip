@@ -261,3 +261,69 @@ pub struct FileSystem {
     path: String,
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn parse_settings_from_file(rel_path: &str) -> anyhow::Result<Settings> {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push(rel_path);
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
+        let settings = toml::from_str::<Settings>(&content)
+            .map_err(|e| anyhow::anyhow!("Failed to parse {}: {}", path.display(), e))?;
+        settings.validate()?;
+        Ok(settings)
+    }
+
+    #[test]
+    fn shipped_toml_configs_parse() -> anyhow::Result<()> {
+        // Main sample config.
+        let _ = parse_settings_from_file("sirius-hip.toml")?;
+        // Dev configs.
+        let _ = parse_settings_from_file("sirius-hip.dev.toml")?;
+        let _ = parse_settings_from_file("sirius-hip.dev440.toml")?;
+        Ok(())
+    }
+
+    #[test]
+    fn docker_like_config_parses() -> anyhow::Result<()> {
+        // Mirrors the keys/types produced by docker/build/sirius-hip.conf.template.
+        let toml = r#"
+loglevel = "info,hyper=info,reqwest=info,actix_web=info"
+max_default = 2000
+cors_whitelist = ["*"]
+
+app_database_url = "mysql://pacs:pacs@opendicom_pacs_db:3306/pacsdb"
+app_database_max_connections = 20
+
+jwt_auth = "onetime"
+jwt_secret = "secret"
+jwt_algorithm = "HS256"
+
+[onetime_cleanup]
+enabled = true
+interval_secs = 300
+retention_hours = 24
+session_batch = 200
+max_batches = 20
+token_delete_limit = 5000
+initial_jitter_max_secs = 60
+
+[dicomarchive]
+version = "dcm4chee2183"
+database_url = "mysql://pacs:pacs@opendicom_pacs_db:3306/pacsdb"
+database_max_connections = 40
+wadouri = "http://opendicom_pacs:8080/wado"
+transfer_syntax = "1.2.840.10008.1.2.1"
+filesystems = [{ id = 1, path = "/DICOM/archive" }]
+"#;
+
+        let settings = toml::from_str::<Settings>(toml)?;
+        settings.validate()?;
+        Ok(())
+    }
+}
+

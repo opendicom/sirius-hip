@@ -73,7 +73,7 @@ Optional variable. Default value: unset.
 Optional variable. Default value: unset.
 
 #### `SIRIUS_HIP_TRANSFER_SYNTAX` 
-Optional variable. Default value: `1.2.840.10008.1.2`.
+Optional variable. Default value: `1.2.840.10008.1.2.1`.
 
 #### `SIRIUS_HIP_MAX_DEFAULT` 
 Optional variable. Default value: `5000`.

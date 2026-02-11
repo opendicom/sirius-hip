@@ -8,21 +8,29 @@ max_default = ${SIRIUS_HIP_MAX_DEFAULT}
 # Cors allowed origins
 cors_whitelist=${CORS_WHITELIST}
 
-# Cors allowed headers
-cors_headers=["GET", "OPTION"]
-
 # ---------------------------------------------------------------------------
-# -- DATABASE ---------------------------------------------------------------
-database_url = "mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}"
-# Database maximum connection limit
-database_max_connections = 40
+# -- APP DATABASE (Download sessions) ---------------------------------------
+# Required for the /files/{session_id}/{file_index} flow.
+app_database_url = "${SIRIUS_HIP_APP_DATABASE_URL}"
+app_database_max_connections = ${SIRIUS_HIP_APP_DATABASE_MAX_CONNECTIONS}
 
 # ---------------------------------------------------------------------------
 # -- JWT AUTHORIZATION ------------------------------------------------------
 # TODO: Describe
-jwt_auth = ${SIRIUS_HIP_JWT_AUTH}
+jwt_auth = "${SIRIUS_HIP_JWT_AUTH}"
 jwt_secret = "${AUTH_JWT_SECRET}"
 jwt_algorithm = "${AUTH_JWT_ALGO}"
+
+# ---------------------------------------------------------------------------
+# -- ONETIME CLEANUP --------------------------------------------------------
+[onetime_cleanup]
+enabled = ${SIRIUS_HIP_ONETIME_CLEANUP_ENABLED}
+interval_secs = ${SIRIUS_HIP_ONETIME_CLEANUP_INTERVAL_SECS}
+retention_hours = ${SIRIUS_HIP_ONETIME_CLEANUP_RETENTION_HOURS}
+session_batch = ${SIRIUS_HIP_ONETIME_CLEANUP_SESSION_BATCH}
+max_batches = ${SIRIUS_HIP_ONETIME_CLEANUP_MAX_BATCHES}
+token_delete_limit = ${SIRIUS_HIP_ONETIME_CLEANUP_TOKEN_DELETE_LIMIT}
+initial_jitter_max_secs = ${SIRIUS_HIP_ONETIME_CLEANUP_INITIAL_JITTER_MAX_SECS}
 
 # ---------------------------------------------------------------------------
 # -- BACKEND PACS -----------------------------------------------------------
@@ -30,6 +38,11 @@ jwt_algorithm = "${AUTH_JWT_ALGO}"
 # Required
 # TODO: Describe [dcm4chee2183, dcm4chee440]
 version = "${SIRIUS_HIP_PACS_VERSION}"
+
+# Required
+database_url = "${SIRIUS_HIP_PACS_DATABASE_URL}"
+# Database maximum connection limit
+database_max_connections = ${SIRIUS_HIP_PACS_DATABASE_MAX_CONNECTIONS}
 
 # Optional
 # Required only for [html5dicom](https://github.com/opendicom/html5)

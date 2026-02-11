@@ -97,7 +97,10 @@ wadouri= "http://localhost:8080/dcm4chee-arc/wado/DCM4CHEE"
 
 # Required
 # Transfer syntax to configure in the manifest for retrive images from wado.
-transfer_syntax="1.2.840.10008.1.2.1" # Explicit VR Little Endian
+# Explicit VR Little Endian     1.2.840.10008.1.2.1
+# Implicit VR Endian            1.2.840.10008.1.2
+# JPEG 2000 Lossless Only       1.2.840.10008.1.2.4.90
+transfer_syntax="1.2.840.10008.1.2.1"
 
 # Optional
 # Sets how to get the number of frames in an instance

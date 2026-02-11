@@ -1,4 +1,4 @@
-FROM rust:1.81-bookworm AS builder
+FROM rust:1.89-bookworm AS builder
 RUN apt install -y libssl-dev && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* 

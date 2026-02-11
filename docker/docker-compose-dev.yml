@@ -19,7 +19,6 @@ services:
     container_name: opendicom_pacs
     image: opendicom/dcm4chee:latest
     env_file:
-      - ./docker-compose.env
       - ./docker-compose.dev.env
     restart: unless-stopped
     depends_on:
@@ -53,7 +52,6 @@ services:
   #   container_name: opendicom_sirius_hip
   #   image: opendicom/sirius-hip:latest
   #   env_file:
-  #     - ./docker-compose.env
   #     - ./docker-compose.dev.env
   #   volumes:
   #     - ./service_pacs/archive/:/DICOM/archive/
