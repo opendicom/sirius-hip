@@ -385,17 +385,64 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
             value.chars().filter(|c| c.is_ascii_digit()).collect()
         }
 
+        fn has_wildcards(value: &str) -> bool {
+            value.contains('*') || value.contains('?')
+        }
+
+        // Convert DICOM QIDO wildcards to a MySQL LIKE pattern.
+        // - `*` => `%`
+        // - `?` => `_`
+        // Uses `!` as the LIKE escape character.
+        fn to_mysql_like_pattern(value: &str) -> String {
+            let mut out = String::with_capacity(value.len());
+            for ch in value.chars() {
+                match ch {
+                    '!' => out.push_str("!!"),
+                    '%' => out.push_str("!%"),
+                    '_' => out.push_str("!_"),
+                    '*' => out.push('%'),
+                    '?' => out.push('_'),
+                    _ => out.push(ch),
+                }
+            }
+            out
+        }
+
         let overrides = query.metadata_overrides;
+
+        // Avoid correlated subqueries in SELECT by joining the first patient_id row.
+        // If an override supplies a direct column, we use it and skip the join.
+        let patient_id_override = override_col(overrides, "PatientID");
+        let issuer_override = override_col(overrides, "IssuerOfPatientID");
+
+        // Fast path for exact PatientID searches:
+        // - Filter in the paginated subquery with an indexed join on `patient_id.pat_id`.
+        // - Return PatientID as the exact searched value (constant) and skip the global `pid_first` derived join.
+        // This avoids scanning/grouping the entire `patient_id` table just to render PatientID.
+        let exact_patient_id_for_fast_path = match query.patient_id {
+            Some(v) if !has_wildcards(v) => Some(v),
+            _ => None,
+        };
+        let use_patient_id_fast_path = exact_patient_id_for_fast_path.is_some()
+            && patient_id_override.is_none()
+            && !include.includefield_00100021;
+
+        let mut needs_pid_first_join = patient_id_override.is_none()
+            || (include.includefield_00100021 && issuer_override.is_none());
+        let needs_issuer_join = include.includefield_00100021 && issuer_override.is_none();
+
+        if use_patient_id_fast_path {
+            needs_pid_first_join = false;
+        }
+
         let pat_name_expr = override_or_default(
             overrides,
             "PatientName",
             "CONCAT_WS('^', person_name.family_name, person_name.given_name, person_name.middle_name)",
         );
-        let pat_id_expr = override_or_default(
-            overrides,
-            "PatientID",
-            "(SELECT pid.pat_id FROM patient_id pid WHERE pid.patient_fk = patient.pk ORDER BY pid.pk LIMIT 1)",
-        );
+        let pat_id_expr = patient_id_override
+            .clone()
+            .unwrap_or_else(|| "pid_first.pat_id".to_string());
         let pat_birthdate_expr = override_or_default(overrides, "PatientBirthDate", "patient.pat_birthdate");
         let pat_sex_expr = override_or_default(overrides, "PatientSex", "patient.pat_sex");
         let study_desc_expr = override_or_default(overrides, "StudyDescription", "study.study_desc");
@@ -409,36 +456,53 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
 
         let mut qb = QueryBuilder::<MySql>::new("SELECT ");
         qb.push(format!(
-            "study.study_date AS study_date,\
-                study.study_time AS study_time,\
-                {} AS accession_no,\
-                {} AS mods_in_study,\
-                study.study_iuid AS study_iuid,\
-                study.study_id AS study_id,\
-                {} AS study_desc,\
-                {} AS ref_physician,\
-                CAST(study.num_instances1 AS SIGNED) AS num_instances,\
-                CAST(study.num_series1 AS SIGNED) AS num_series,\
-                {} AS pat_name,\
-                {} AS pat_id,\
-                {} AS pat_birthdate,\
-                {} AS pat_sex",
+            "study.study_date AS study_date,
+             study.study_time AS study_time,
+             {} AS accession_no,
+             {} AS mods_in_study,
+             study.study_iuid AS study_iuid,
+             study.study_id AS study_id,
+             {} AS study_desc,
+             {} AS ref_physician,
+             CAST(study.num_instances1 AS SIGNED) AS num_instances,
+             CAST(study.num_series1 AS SIGNED) AS num_series,
+             {} AS pat_name,",
             accession_expr,
             modalities_expr,
             study_desc_expr,
             ref_phys_expr,
             pat_name_expr,
-            pat_id_expr,
+        ));
+
+        if use_patient_id_fast_path {
+            qb.push(" ")
+                .push_bind(exact_patient_id_for_fast_path.expect("fast path requires exact PatientID"))
+                .push(" AS pat_id,");
+        } else {
+            qb.push(" ").push(pat_id_expr).push(" AS pat_id,");
+        }
+
+        qb.push(format!(
+            " {} AS pat_birthdate,
+             {} AS pat_sex",
             pat_birthdate_expr,
             pat_sex_expr,
         ));
 
+        // Include optional fields based on `includefield` parameters. 
+        // If an include field is requested, select the corresponding 
+        // value; otherwise select NULL to keep the column present but 
+        // empty.
+
+        // SopClassesInStudy
         if include.includefield_00080062 {
             let sop_classes_expr = override_or_default(overrides, "SOPClassesInStudy", "study.cuids_in_study");
             qb.push(", ").push(sop_classes_expr).push(" AS includefield_00080062");
         } else {
             qb.push(", NULL AS includefield_00080062");
         }
+        
+        // StudyDescription
         if include.includefield_00081030 {
             qb.push(", ");
             qb.push(study_desc_expr);
@@ -446,36 +510,57 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         } else {
             qb.push(", NULL AS includefield_00081030");
         }
+
+        // IssuerOfPatientID
         if include.includefield_00100021 {
-            let issuer_default = "(\
-                SELECT iss.entity_id\
-                FROM patient_id pid\
-                LEFT JOIN issuer iss ON iss.pk = pid.issuer_fk\
-                WHERE pid.patient_fk = patient.pk\
-                ORDER BY pid.pk\
-                LIMIT 1\
-            )";
-            let issuer_expr = override_or_default(overrides, "IssuerOfPatientID", issuer_default);
+            let issuer_expr = issuer_override.clone().unwrap_or_else(|| "iss_first.entity_id".to_string());
             qb.push(", ").push(issuer_expr).push(" AS includefield_00100021");
         } else {
             qb.push(", NULL AS includefield_00100021");
         }
 
-        qb.push(
-            " FROM study
-               INNER JOIN patient ON patient.pk = study.patient_fk
-             LEFT JOIN person_name ON person_name.pk = patient.pat_name_fk
-               LEFT JOIN person_name refpn ON refpn.pk = study.ref_phys_name_fk
-               WHERE 1=1",
-        );
+            // Apply filters + pagination first (study-level semantics: 1 row per study).
+            // This keeps expensive expressions/joins limited to the requested window.
+            qb.push(
+                " FROM (
+                SELECT study.pk
+                FROM study
+                INNER JOIN patient ON patient.pk = study.patient_fk
+                LEFT JOIN person_name ON person_name.pk = patient.pat_name_fk
+                LEFT JOIN person_name refpn ON refpn.pk = study.ref_phys_name_fk",
+            );
+
+            if use_patient_id_fast_path {
+                qb.push(" INNER JOIN patient_id pid_filter ON pid_filter.patient_fk = patient.pk AND pid_filter.pat_id = ")
+                    .push_bind(exact_patient_id_for_fast_path.expect("fast path requires exact PatientID"));
+            }
+
+            qb.push(" WHERE 1=1");
 
         if let Some(value) = query.patient_id {
+            if use_patient_id_fast_path {
+                // already filtered by the `pid_filter` join in the subquery
+            } else
             if let Some(col) = override_col(overrides, "PatientID") {
-                qb.push(" AND ").push(col).push(" = ").push_bind(value);
+                if has_wildcards(value) {
+                    qb.push(" AND ")
+                        .push(col)
+                        .push(" LIKE ")
+                        .push_bind(to_mysql_like_pattern(value))
+                        .push(" ESCAPE '!' ");
+                } else {
+                    qb.push(" AND ").push(col).push(" = ").push_bind(value);
+                }
             } else {
-                qb.push(" AND EXISTS (SELECT 1 FROM patient_id pid WHERE pid.patient_fk = patient.pk AND pid.pat_id = ")
-                    .push_bind(value)
-                    .push(")");
+                qb.push(" AND EXISTS (SELECT 1 FROM patient_id pid WHERE pid.patient_fk = patient.pk AND ");
+                if has_wildcards(value) {
+                    qb.push("pid.pat_id LIKE ")
+                        .push_bind(to_mysql_like_pattern(value))
+                        .push(" ESCAPE '!' ");
+                } else {
+                    qb.push("pid.pat_id = ").push_bind(value);
+                }
+                qb.push(")");
             }
         }
 
@@ -483,38 +568,83 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
             let patient_name_where = override_or_default(
                 overrides,
                 "PatientName",
-                "CONCAT_WS(' ', person_name.family_name, person_name.given_name, person_name.middle_name)",
+                "CONCAT_WS('^', person_name.family_name, person_name.given_name, person_name.middle_name)",
             );
-            qb.push(" AND ").push(patient_name_where).push(" REGEXP ").push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND ")
+                    .push(patient_name_where)
+                    .push(" LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND ")
+                    .push(patient_name_where)
+                    .push(" = ")
+                    .push_bind(value);
+            }
         }
 
         if let Some(value) = query.referring_physician_name {
             let ref_phys_where = override_or_default(
                 overrides,
                 "ReferringPhysicianName",
-                "CONCAT_WS(' ', refpn.family_name, refpn.given_name, refpn.middle_name)",
+                "CONCAT_WS('^', refpn.family_name, refpn.given_name, refpn.middle_name)",
             );
-            qb.push(" AND ").push(ref_phys_where).push(" REGEXP ").push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND ")
+                    .push(ref_phys_where)
+                    .push(" LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND ")
+                    .push(ref_phys_where)
+                    .push(" = ")
+                    .push_bind(value);
+            }
         }
 
         if let Some(value) = query.accession_no {
             if let Some(col) = override_col(overrides, "AccessionNumber") {
-                qb.push(" AND ").push(col).push(" = ").push_bind(value);
+                if has_wildcards(value) {
+                    qb.push(" AND ")
+                        .push(col)
+                        .push(" LIKE ")
+                        .push_bind(to_mysql_like_pattern(value))
+                        .push(" ESCAPE '!' ");
+                } else {
+                    qb.push(" AND ").push(col).push(" = ").push_bind(value);
+                }
             } else {
-                qb.push(" AND study.accession_no = ").push_bind(value);
+                if has_wildcards(value) {
+                    qb.push(" AND study.accession_no LIKE ")
+                        .push_bind(to_mysql_like_pattern(value))
+                        .push(" ESCAPE '!' ");
+                } else {
+                    qb.push(" AND study.accession_no = ").push_bind(value);
+                }
             }
         }
 
         if let Some(value) = query.modalities_in_study {
-            if let Some(col) = override_col(overrides, "ModalitiesInStudy") {
-                qb.push(" AND ").push(col).push(" REGEXP ").push_bind(value);
-            } else {
-                qb.push(" AND study.mods_in_study REGEXP ").push_bind(value);
-            }
+            let mods_col = override_or_default(overrides, "ModalitiesInStudy", "study.mods_in_study");
+            // `study.mods_in_study` is a backslash-separated list. QIDO matching applies to an item,
+            // so we search within `\\<item>\\` boundaries using LIKE and wildcards.
+            qb.push(" AND CONCAT(CHAR(92), IFNULL(")
+                .push(mods_col)
+                .push(", ''), CHAR(92)) LIKE CONCAT('%', CHAR(92), ")
+                .push_bind(to_mysql_like_pattern(value))
+                .push(", CHAR(92), '%') ESCAPE '!' ");
         }
 
         if let Some(value) = query.study_id {
-            qb.push(" AND study.study_id = ").push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND study.study_id LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND study.study_id = ").push_bind(value);
+            }
         }
 
         if let Some(value) = query.study_iuid {
@@ -535,29 +665,36 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
 
         if let Some(value) = query.study_date {
             let raw = value.trim();
-            if raw.ends_with('-') {
-                let start = digits_only(raw.trim_end_matches('-'));
-                if !start.is_empty() {
-                    qb.push(" AND study.study_date >= ").push_bind(start);
-                }
-            } else if raw.starts_with('-') {
+            if raw.starts_with('-') {
                 let end = digits_only(raw.trim_start_matches('-'));
-                if !end.is_empty() {
+                if end.len() == 8 {
                     qb.push(" AND study.study_date <= ").push_bind(end);
                 }
-            } else if let Some((start, end)) = raw.split_once('-') {
-                let start = digits_only(start);
-                let end = digits_only(end);
-                if !start.is_empty() && !end.is_empty() {
+            } else if raw.ends_with('-') {
+                let start = digits_only(raw.trim_end_matches('-'));
+                if start.len() == 8 {
+                    qb.push(" AND study.study_date >= ").push_bind(start);
+                }
+            } else {
+                let digits = digits_only(raw);
+                if digits.len() == 8 {
+                    qb.push(" AND study.study_date = ").push_bind(digits);
+                } else if digits.len() == 16 {
+                    let start = digits[0..8].to_string();
+                    let end = digits[8..16].to_string();
                     qb.push(" AND study.study_date BETWEEN ")
                         .push_bind(start)
                         .push(" AND ")
                         .push_bind(end);
-                }
-            } else {
-                let exact = digits_only(raw);
-                if !exact.is_empty() {
-                    qb.push(" AND study.study_date = ").push_bind(exact);
+                } else if let Some((start, end)) = raw.split_once('-') {
+                    let start = digits_only(start);
+                    let end = digits_only(end);
+                    if start.len() == 8 && end.len() == 8 {
+                        qb.push(" AND study.study_date BETWEEN ")
+                            .push_bind(start)
+                            .push(" AND ")
+                            .push_bind(end);
+                    }
                 }
             }
         }
@@ -569,10 +706,41 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
             }
         }
 
-        qb.push(" ORDER BY study.study_iuid ASC LIMIT ").push_bind(query.limit);
+        qb.push(" ORDER BY study.study_iuid ASC LIMIT ")
+            .push_bind(query.limit);
         if let Some(offset) = query.offset {
             qb.push(" OFFSET ").push_bind(offset);
         }
+
+                qb.push(
+                        ") ids
+                            INNER JOIN study ON study.pk = ids.pk
+                            INNER JOIN patient ON patient.pk = study.patient_fk
+                            LEFT JOIN person_name ON person_name.pk = patient.pat_name_fk
+                            LEFT JOIN person_name refpn ON refpn.pk = study.ref_phys_name_fk",
+                );
+
+        if needs_pid_first_join {
+            qb.push(
+                " LEFT JOIN (
+                    SELECT pid.patient_fk, pid.pat_id, pid.issuer_fk
+                    FROM patient_id pid
+                    INNER JOIN (
+                        SELECT patient_fk, MIN(pk) AS min_pk
+                        FROM patient_id
+                        GROUP BY patient_fk
+                    ) pid_min
+                        ON pid_min.patient_fk = pid.patient_fk
+                       AND pid_min.min_pk = pid.pk
+                ) pid_first ON pid_first.patient_fk = patient.pk",
+            );
+
+            if needs_issuer_join {
+                qb.push(" LEFT JOIN issuer iss_first ON iss_first.pk = pid_first.issuer_fk");
+            }
+        }
+
+        qb.push(" ORDER BY study.study_iuid ASC");
 
         let rows = qb
             .build_query_as::<QidoStudyRow>()

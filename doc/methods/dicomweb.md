@@ -13,6 +13,7 @@ Search for studies.
 Notes:
 
 - The handler currently expects `content-type: application/json` (even though the request is a GET).
+- Query parameters support DICOM-style wildcards (`*` and `?`) where applicable (see [doc/qido.md](../qido.md)).
 - `/qido/series` and `/qido/instances` exist in routing but are not implemented in the src2 flow yet.
 
 #### Example

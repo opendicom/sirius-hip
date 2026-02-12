@@ -4,6 +4,7 @@ use dicom_core::value::PrimitiveValue;
 use dicom_core::{DataElement, Tag, VR};
 use dicom_json::DicomJson;
 use dicom_object::InMemDicomObject;
+use log::error;
 
 use crate::api::qido::QidoStudiesParams;
 use crate::constants::QIDO_STUDY_INCLUDEFIELD_DIC;
@@ -37,6 +38,7 @@ pub async fn execute_qido_studies(
             if let Some(tag) = QIDO_STUDY_INCLUDEFIELD_DIC.get(field.as_str()) {
                 validated_include_fields.insert(*tag);
             } else {
+                error!("Invalid includefield parameter: {field}");
                 return Err(AppError::BadRequest);
             }
         }

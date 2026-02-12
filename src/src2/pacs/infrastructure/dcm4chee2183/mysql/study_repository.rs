@@ -372,6 +372,29 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         query: QidoStudiesQuery<'_>,
         include: QidoStudiesIncludeFields,
     ) -> Result<Vec<QidoStudyRow>, PacsError> {
+        fn split_backslash(value: &str) -> Vec<&str> {
+            value.split('\\').filter(|s| !s.is_empty()).collect()
+        }
+
+        fn has_wildcards(value: &str) -> bool {
+            value.contains('*') || value.contains('?')
+        }
+
+        fn to_mysql_like_pattern(value: &str) -> String {
+            let mut out = String::with_capacity(value.len());
+            for ch in value.chars() {
+                match ch {
+                    '!' => out.push_str("!!"),
+                    '%' => out.push_str("!%"),
+                    '_' => out.push_str("!_"),
+                    '*' => out.push('%'),
+                    '?' => out.push('_'),
+                    _ => out.push(ch),
+                }
+            }
+            out
+        }
+
         fn to_dicom_date_digits(date: &str) -> String {
             date.chars().filter(|c| c.is_ascii_digit()).collect()
         }
@@ -410,7 +433,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                 {} AS study_desc,\
                 {} AS ref_physician,\
                 CAST(study.num_instances AS SIGNED) AS num_instances,\
-                (SELECT COUNT(*) FROM series WHERE series.study_fk = study.pk) AS num_series,\
+                CAST(study.num_series AS SIGNED) AS num_series,\
                 {} AS pat_name,\
                 {} AS pat_id,\
                 {} AS pat_birthdate,\
@@ -440,55 +463,116 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             qb.push(", NULL AS includefield_00081030");
         }
         if include.includefield_00100021 {
-            let issuer_expr = override_or_default(overrides, "IssuerOfPatientID", "''");
+            let issuer_expr = override_or_default(
+                overrides,
+                "IssuerOfPatientID",
+                "COALESCE(patient.pat_id_issuer, '')",
+            );
             qb.push(", ").push(issuer_expr).push(" AS includefield_00100021");
         } else {
             qb.push(", NULL AS includefield_00100021");
         }
 
-        qb.push(" FROM study INNER JOIN patient ON patient.pk = study.patient_fk WHERE 1=1");
+        // Apply pagination at the study level first, then join back to fetch full row fields.
+        qb.push(" FROM (SELECT study.pk AS pk FROM study INNER JOIN patient ON patient.pk = study.patient_fk WHERE 1=1");
 
         if let Some(value) = query.patient_id {
             let patient_id_where = override_or_default(overrides, "PatientID", "patient.pat_id");
-            qb.push(" AND ").push(patient_id_where).push(" = ").push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND ")
+                    .push(patient_id_where)
+                    .push(" LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND ")
+                    .push(patient_id_where)
+                    .push(" = ")
+                    .push_bind(value);
+            }
         }
 
         if let Some(value) = query.patient_name {
             let patient_name_where = override_or_default(overrides, "PatientName", "patient.pat_name");
-            qb.push(" AND ")
-                .push(patient_name_where)
-                .push(" REGEXP ")
-                .push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND ")
+                    .push(patient_name_where)
+                    .push(" LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND ")
+                    .push(patient_name_where)
+                    .push(" = ")
+                    .push_bind(value);
+            }
         }
 
         if let Some(value) = query.referring_physician_name {
             let ref_phys_where = override_or_default(overrides, "ReferringPhysicianName", "study.ref_physician");
-            qb.push(" AND ").push(ref_phys_where).push(" REGEXP ").push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND ")
+                    .push(ref_phys_where)
+                    .push(" LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND ")
+                    .push(ref_phys_where)
+                    .push(" = ")
+                    .push_bind(value);
+            }
         }
 
         if let Some(value) = query.accession_no {
             let accession_where = override_or_default(overrides, "AccessionNumber", "study.accession_no");
-            qb.push(" AND ").push(accession_where).push(" = ").push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND ")
+                    .push(accession_where)
+                    .push(" LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND ")
+                    .push(accession_where)
+                    .push(" = ")
+                    .push_bind(value);
+            }
         }
 
         if let Some(value) = query.modalities_in_study {
             let modalities_where = override_or_default(overrides, "ModalitiesInStudy", "study.mods_in_study");
-            qb.push(" AND ")
-                .push(modalities_where)
-                .push(" REGEXP ")
-                .push_bind(value);
+            // `study.mods_in_study` is a backslash-separated list. QIDO matching applies to an item,
+            // so we search within `\\<item>\\` boundaries using LIKE and DICOM wildcards.
+            let values = split_backslash(value);
+            if !values.is_empty() {
+                qb.push(" AND (");
+                for (idx, v) in values.iter().enumerate() {
+                    if idx > 0 {
+                        qb.push(" OR ");
+                    }
+                    qb.push("CONCAT(CHAR(92), IFNULL(")
+                        .push(modalities_where.clone())
+                        .push(", ''), CHAR(92)) LIKE CONCAT('%', CHAR(92), ")
+                        .push_bind(to_mysql_like_pattern(v))
+                        .push(", CHAR(92), '%') ESCAPE '!' ");
+                }
+                qb.push(")");
+            }
         }
 
         if let Some(value) = query.study_id {
-            qb.push(" AND study.study_id = ").push_bind(value);
+            if has_wildcards(value) {
+                qb.push(" AND study.study_id LIKE ")
+                    .push_bind(to_mysql_like_pattern(value))
+                    .push(" ESCAPE '!' ");
+            } else {
+                qb.push(" AND study.study_id = ").push_bind(value);
+            }
         }
 
         if let Some(value) = query.study_iuid {
-            let values: Vec<String> = value
-                .split('\\')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect();
+            let values: Vec<String> = split_backslash(value).into_iter().map(|s| s.to_string()).collect();
             if !values.is_empty() {
                 qb.push(" AND study.study_iuid IN (");
                 let mut separated = qb.separated(", ");
@@ -500,27 +584,50 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // Study date: QIDO uses DICOM date range syntax (YYYYMMDD-YYYYMMDD).
-        // We also accept ISO-like YYYY-MM-DD by stripping digits.
+        // We also accept ISO-like date strings by extracting digits.
         if let Some(value) = query.study_date {
             let raw = value.trim();
-            if raw.ends_with('-') {
-                let start = raw.trim_end_matches('-');
-                let start_iso = yyyymmdd_to_iso(start).unwrap_or_else(|| start.to_string());
-                qb.push(" AND DATE(study.study_datetime) >= ").push_bind(start_iso);
-            } else if raw.starts_with('-') {
-                let end = raw.trim_start_matches('-');
-                let end_iso = yyyymmdd_to_iso(end).unwrap_or_else(|| end.to_string());
-                qb.push(" AND DATE(study.study_datetime) <= ").push_bind(end_iso);
-            } else if let Some((start, end)) = raw.split_once('-') {
-                let start_iso = yyyymmdd_to_iso(start).unwrap_or_else(|| start.to_string());
-                let end_iso = yyyymmdd_to_iso(end).unwrap_or_else(|| end.to_string());
-                qb.push(" AND DATE(study.study_datetime) BETWEEN ")
-                    .push_bind(start_iso)
-                    .push(" AND ")
-                    .push_bind(end_iso);
+            if raw.starts_with('-') {
+                let end = to_dicom_date_digits(raw.trim_start_matches('-'));
+                if end.len() == 8 {
+                    if let Some(end_iso) = yyyymmdd_to_iso(&end) {
+                        qb.push(" AND DATE(study.study_datetime) <= ").push_bind(end_iso);
+                    }
+                }
+            } else if raw.ends_with('-') {
+                let start = to_dicom_date_digits(raw.trim_end_matches('-'));
+                if start.len() == 8 {
+                    if let Some(start_iso) = yyyymmdd_to_iso(&start) {
+                        qb.push(" AND DATE(study.study_datetime) >= ").push_bind(start_iso);
+                    }
+                }
             } else {
-                let exact_iso = yyyymmdd_to_iso(raw).unwrap_or_else(|| raw.to_string());
-                qb.push(" AND DATE(study.study_datetime) = ").push_bind(exact_iso);
+                let digits = to_dicom_date_digits(raw);
+                if digits.len() == 8 {
+                    if let Some(exact_iso) = yyyymmdd_to_iso(&digits) {
+                        qb.push(" AND DATE(study.study_datetime) = ").push_bind(exact_iso);
+                    }
+                } else if digits.len() == 16 {
+                    let start = &digits[0..8];
+                    let end = &digits[8..16];
+                    if let (Some(start_iso), Some(end_iso)) = (yyyymmdd_to_iso(start), yyyymmdd_to_iso(end)) {
+                        qb.push(" AND DATE(study.study_datetime) BETWEEN ")
+                            .push_bind(start_iso)
+                            .push(" AND ")
+                            .push_bind(end_iso);
+                    }
+                } else if let Some((start, end)) = raw.split_once('-') {
+                    let start = to_dicom_date_digits(start);
+                    let end = to_dicom_date_digits(end);
+                    if start.len() == 8 && end.len() == 8 {
+                        if let (Some(start_iso), Some(end_iso)) = (yyyymmdd_to_iso(&start), yyyymmdd_to_iso(&end)) {
+                            qb.push(" AND DATE(study.study_datetime) BETWEEN ")
+                                .push_bind(start_iso)
+                                .push(" AND ")
+                                .push_bind(end_iso);
+                        }
+                    }
+                }
             }
         }
 
@@ -540,6 +647,10 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         if let Some(offset) = query.offset {
             qb.push(" OFFSET ").push_bind(offset);
         }
+
+        qb.push(") ids INNER JOIN study ON study.pk = ids.pk INNER JOIN patient ON patient.pk = study.patient_fk");
+
+        qb.push(" ORDER BY study.study_iuid ASC");
 
         let rows = qb
             .build_query_as::<QidoStudyRow>()

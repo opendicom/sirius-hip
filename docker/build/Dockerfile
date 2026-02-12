@@ -21,7 +21,7 @@ WORKDIR /
 COPY ./docker/build/docker-entrypoint.sh /
 COPY ./docker/build/sirius-hip.conf.template /template/
 COPY --from=builder /usr/local/cargo/bin/sirius-hip /usr/local/bin/sirius-hip
-COPY --from=builder /usr/src/sirius-hip/www/studyToken/urlbuilder /var/www/html/
+COPY --from=builder /usr/src/sirius-hip/www/ /var/www/html/
 
 RUN sed -i 's/listen 80 default_server;/listen 5002 default_server;/g' /etc/nginx/sites-enabled/default
 RUN sed -i 's/listen [::]:5002 default_server;/listen [::]:5002 default_server;/g' /etc/nginx/sites-enabled/default

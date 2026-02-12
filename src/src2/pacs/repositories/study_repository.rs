@@ -162,7 +162,12 @@ pub struct QidoStudiesQuery<'a> {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct QidoStudiesIncludeFields {
+    /// Include SOPClassesinStudy (0008,0062)
     pub includefield_00080062: bool,
+    
+    /// Include StudyDescription (0008,1030)
     pub includefield_00081030: bool,
+
+    /// Include IssuerOfPatientID (0010,0021)
     pub includefield_00100021: bool,
 }

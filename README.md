@@ -61,7 +61,9 @@ cargo run --release -- -c ./sirius-hip.toml
 - `GET /echo` health check
 - `GET /settings` runtime config (secrets redacted)
 - `GET /studyToken` viewer/session manifest builder
-- `GET /studyToken/urlbuilder` HTML helper to build a `/studyToken` URL
+- StudyToken URL builder (Docker nginx): `/urlbuilder/study-token.html`
+- `GET /qido/studies` QIDO-RS SearchForStudies
+- QIDO URL builder (Docker nginx): `/urlbuilder/qido-studies.html`
 
 # License
 

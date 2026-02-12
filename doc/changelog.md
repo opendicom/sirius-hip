@@ -11,6 +11,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - New optimized QIDO-RS endpoint for studies: **`/qido/studies`**
   - Validates query parameters and formats responses as DICOM JSON.
   - Supports **`includefield`** with validation against an allowlist.
+- DICOM wildcard support in QIDO filters
+  - Supports `*` (any sequence) and `?` (single char) via MySQL `LIKE ... ESCAPE`.
 - Dataset overrides for metadata in study queries
   - New **`metadata_overrides`** configuration in `sirius-hip.toml`.
   - Allows customizing patient/study attributes returned by queries.
@@ -18,11 +20,20 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   - Enforces one-time token semantics (claim-once) and improves validation/errors.
 - Documentation for QIDO, StudyToken, and dataset overrides.
 - Reference database schemas for dcm4chee 2.18.3 and 4.4.0.
+- Static URL builders served by nginx
+  - StudyToken builder: `/urlbuilder/study-token.html`
+  - QIDO studies builder: `/urlbuilder/qido-studies.html`
 
 ### Changed
 - `InstitutionName` handling for study queries and OHIF models.
 - QIDO and StudyToken flows refactored into functional use-cases (`src2/application/use_cases`).
 - StudyToken URL builder updated to work with the updated token/session flow.
+- QIDO studies SQL significantly optimized (pagination-first + fewer correlated subqueries).
+- dcm4chee 2.18.3 and 4.4.0 adapters aligned for QIDO search semantics and returned attributes.
+- Docker image now ships the full `www/` static tree for nginx.
+
+### Removed
+- Legacy URL builder paths: `/studyToken/urlbuilder` and `/qido/urlbuilder`.
 
 ## [1.0.2] - 2025-10-02
 ### Added

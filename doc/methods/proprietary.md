@@ -8,7 +8,7 @@
 - `GET` [`/pacs/{oid}/properties/qido`](#GET-/pacs/{oid}/properties/qido) Get qido url in the specific PACS
 - `GET` [`/pacs/{oid}/properties/wadouri`](#GET-/pacs/{oid}/properties/wadouri) Get wado url in the specific PACS
 - `GET` [`/studyToken`](#GET-/studyToken) Construct manifest to view dicom studies in deferents viewers
-- `GET` [`/studyToken/urlbuilder`](#GET-/studyToken/urlbuilder) HTML tool to build the url for *stutyToken* method
+- URL builder (Docker nginx): `/urlbuilder/study-token.html` HTML tool to build the url for *studyToken* method
 
 
 
@@ -260,7 +260,7 @@ http://pacs/wado
 
 
 
-## `GET` `/studyToken/urlbuilder`
+## URL builder (Docker nginx): `/urlbuilder/study-token.html`
 
 Construct manifest or dicom zip file to download or view dicom studies in diferents viewers:
 
@@ -401,9 +401,11 @@ curl -X GET http://sirius-hip/studyToken?accessType=dicom.zip&StudyInstanceUID=1
 
 
 
-## `GET` `/studyToken/urlbuilder`
+## URL builder (Docker nginx): `/urlbuilder/study-token.html`
 
-HTML tool to build the url for *stutyToken* method
+HTML tool to build the url for *studyToken* method.
+
+Note: this is served by nginx in the Docker image.
 
 ![resources/studytoken-urlbuilder-jpg](../resources/studytoken-urlbuilder.png)
 

@@ -44,6 +44,28 @@ Plus:
 - `fuzzymatching` (currently ignored)
 - `token` (currently ignored)
 
+### Wildcard matching
+
+For string-like query parameters, Sirius HIP follows DICOM QIDO-RS wildcard semantics:
+
+- `*` matches any sequence of characters (including empty)
+- `?` matches any single character
+
+This is implemented in SQL using `LIKE` (not regex). If you need partial matching, include `*` explicitly.
+
+Examples:
+
+- `PatientName=DOE^J*` (prefix match on given name)
+- `ReferringPhysicianName=*SMITH*` (contains)
+- `AccessionNumber=2026*`
+- `StudyID=*ABC*`
+- `ModalitiesInStudy=C*` (matches modalities in a backslash-separated list, e.g. `CT`, `CR`)
+
+Notes:
+
+- Parameters without `*`/`?` are treated as exact matches.
+- `StudyInstanceUID` still supports multiple values separated by `\\` (exact UID values).
+
 ## Response format
 
 The endpoint returns a JSON array of DICOM JSON objects (using `dicom-json` + `InMemDicomObject`).
@@ -78,7 +100,7 @@ Only a small allowlist is supported (validated via `QIDO_STUDY_INCLUDEFIELD_DIC`
 Notes:
 - `00100021` (IssuerOfPatientID) depends on the PACS schema:
    - dcm4chee **4.4.0**: returned from `patient_id` → `issuer` when available.
-   - dcm4chee **2.18.3**: typically not modeled separately; currently returned as empty when requested.
+   - dcm4chee **2.18.3**: returned from `patient.pat_id_issuer` (or empty if NULL).
 
 ## Implementation details (performance-oriented)
 
@@ -93,7 +115,7 @@ The goal of the src2 QIDO endpoint is to reduce overhead compared to the legacy 
 3. **No N+1 queries**.
    - All filters (including PatientID in dcm4chee440) are handled in SQL.
 4. **Count strategy**.
-   - dcm4chee2183: `num_series` is computed via a correlated subquery; `num_instances` comes from `study.num_instances`.
+   - dcm4chee2183: `num_series` / `num_instances` come from `study.num_series` / `study.num_instances`.
    - dcm4chee440: uses `study.num_series1` / `study.num_instances1`.
 5. **DICOM formatting normalization**.
    - Dates/times are normalized by stripping non-digits and reformatting into DICOM `DA/TM`.

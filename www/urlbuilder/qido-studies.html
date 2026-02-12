@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sirius HIP - QIDO /studies URL builder</title>
+    <link href="../shared/bootstrap/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="../shared/main.css" rel="stylesheet" />
+    <style>
+      pre { white-space: pre-wrap; }
+    </style>
+    <script src="../shared/urlbuilder.js"></script>
+    <script src="./qido-studies.js"></script>
+  </head>
+  <body class="bg-body">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="../index.html">Sirius HIP - QIDO /studies URL builder</a>
+        <div class="d-flex gap-2">
+          <a class="btn btn-outline-secondary btn-sm" href="study-token.html">StudyToken builder</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container-fluid px-4 py-4">
+      <div class="alert alert-info">
+        Wildcards: use <code>*</code> (any sequence) and <code>?</code> (one char). Without wildcards, values are treated as exact matches.
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12 col-lg-6">
+          <div class="card">
+            <div class="card-header">Runtime</div>
+            <div class="card-body">
+              <label class="form-label" for="in-SiriusHipHost">Sirius HIP host</label>
+              <input id="in-SiriusHipHost" class="form-control" type="text" placeholder="https://host:5001" />
+
+              <div class="row g-2 mt-2">
+                <div class="col-6">
+                  <label class="form-label" for="in-limit">limit</label>
+                  <input id="in-limit" class="form-control" type="number" min="1" step="1" placeholder="50" />
+                </div>
+                <div class="col-6">
+                  <label class="form-label" for="in-offset">offset</label>
+                  <input id="in-offset" class="form-control" type="number" min="0" step="1" placeholder="0" />
+                </div>
+              </div>
+
+              <div class="mt-3">
+                <div class="form-label">includefield</div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="in-include-StudyDescription" />
+                  <label class="form-check-label" for="in-include-StudyDescription">StudyDescription (00081030)</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="in-include-SOPClassesInStudy" />
+                  <label class="form-check-label" for="in-include-SOPClassesInStudy">SOPClassesInStudy (00080062)</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="in-include-IssuerOfPatientID" />
+                  <label class="form-check-label" for="in-include-IssuerOfPatientID">IssuerOfPatientID (00100021)</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+          <div class="card">
+            <div class="card-header">Query parameters</div>
+            <div class="card-body">
+              <div class="row g-2">
+                <div class="col-12">
+                  <label class="form-label" for="in-PatientID">PatientID</label>
+                  <input id="in-PatientID" class="form-control" type="text" placeholder="123*" />
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="in-PatientName">PatientName</label>
+                  <input id="in-PatientName" class="form-control" type="text" placeholder="DOE^J*" />
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="in-ReferringPhysicianName">ReferringPhysicianName</label>
+                  <input id="in-ReferringPhysicianName" class="form-control" type="text" placeholder="*SMITH*" />
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="in-AccessionNumber">AccessionNumber</label>
+                  <input id="in-AccessionNumber" class="form-control" type="text" placeholder="2026*" />
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="in-ModalitiesInStudy">ModalitiesInStudy</label>
+                  <input id="in-ModalitiesInStudy" class="form-control" type="text" placeholder="C*" />
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="in-StudyInstanceUID">StudyInstanceUID</label>
+                  <input id="in-StudyInstanceUID" class="form-control" type="text" placeholder="1.2.3.4\\5.6.7.8" />
+                  <div class="form-text">Multiple UIDs supported, separated by <code>\\</code> (exact values).</div>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="in-StudyID">StudyID</label>
+                  <input id="in-StudyID" class="form-control" type="text" placeholder="*ABC*" />
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="in-StudyDate">StudyDate</label>
+                  <input id="in-StudyDate" class="form-control" type="text" placeholder="20260101-20261231" />
+                  <div class="form-text">Accepted forms: <code>YYYYMMDD</code>, <code>YYYYMMDD-</code>, <code>-YYYYMMDD</code>, <code>YYYYMMDD-YYYYMMDD</code>.</div>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="in-StudyTime">StudyTime</label>
+                  <input id="in-StudyTime" class="form-control" type="text" placeholder="101530" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header">Built URL</div>
+            <div class="card-body">
+              <div id="out-errors" class="alert alert-warning d-none" role="alert"></div>
+              <div class="input-group">
+                <input id="out-url" class="form-control" type="text" readonly />
+                <button id="btn-copy" class="btn btn-outline-secondary" type="button">Copy</button>
+                <button id="btn-open" class="btn btn-primary" type="button">Open</button>
+              </div>
+              <div class="mt-2">
+                <div class="form-label">curl</div>
+                <pre class="bg-body-tertiary border rounded p-2"><code id="out-curl"></code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="../shared/bootstrap/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>

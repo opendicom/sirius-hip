@@ -1,0 +1,15 @@
+[Unit]
+Description=Sirius HIP
+
+[Service]
+Type=simple
+ExecStart=/opt/sirius-hip/sirius-hip -b 0.0.0.0:80 -c /opt/sirius-hip/sirius-hip.toml
+KillSignal=SIGQUIT
+TimeoutStopSec=5
+KillMode=mixed
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=sirius-hip
+
+[Install]
+WantedBy=multi-user.target

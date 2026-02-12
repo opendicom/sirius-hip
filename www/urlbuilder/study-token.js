@@ -1,47 +1,19 @@
+var U = window.SiriusHipUrlBuilder;
+
 function normalizeBaseUrl(raw, fallback) {
-    var trimmed = (raw || "").trim();
-    if (!trimmed) return fallback;
-    if (/^https?:\/\//i.test(trimmed)) return trimmed;
-    if (trimmed.startsWith("//")) return window.location.protocol + trimmed;
-    return window.location.protocol + "//" + trimmed;
+    return U.normalizeBaseUrl(raw, fallback);
 }
 
 function readValue(id) {
-    var el = document.getElementById(id);
-    if (!el) return "";
-    return (el.value || "").trim();
+    return U.readValue(id);
 }
 
 function openInNewTab(url) {
-    if (!url) return;
-    window.open(url, "_blank", "noopener");
+    return U.openInNewTab(url);
 }
 
 async function copyToClipboard(text) {
-    if (!text) return false;
-    try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-            return true;
-        }
-    } catch (_e) {
-        // fallback below
-    }
-
-    try {
-        var ta = document.createElement("textarea");
-        ta.value = text;
-        ta.setAttribute("readonly", "");
-        ta.style.position = "absolute";
-        ta.style.left = "-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        var ok = document.execCommand("copy");
-        document.body.removeChild(ta);
-        return ok;
-    } catch (_e2) {
-        return false;
-    }
+    return await U.copyToClipboard(text);
 }
 
 function flashCopied(btn) {
@@ -86,22 +58,15 @@ function setFieldValidState(id, errorMessage) {
 }
 
 function splitBackslashList(raw) {
-    var value = (raw || "").trim();
-    if (!value) return [];
-    return value
-        .split("\\")
-        .map(function (x) { return (x || "").trim(); })
-        .filter(function (x) { return !!x; });
+    return U.splitBackslashList(raw);
 }
 
 function isValidUidToken(token) {
-    // DICOM UID / OID practical validator: digits and dots, non-empty.
-    // (Does not enforce full UID rules; keeps client-side validation forgiving.)
-    return /^[0-9]+(\.[0-9]+)*$/.test(token);
+    return U.isValidUidToken(token);
 }
 
 function isValidModalityToken(token) {
-    return /^[A-Za-z0-9]{1,16}$/.test(token);
+    return U.isValidModalityToken(token);
 }
 
 function isValidStudyDate(raw) {
@@ -133,14 +98,7 @@ function isValidStudyDate(raw) {
 }
 
 function isValidHttpUrl(raw) {
-    var value = (raw || "").trim();
-    if (!value) return true;
-    try {
-        var u = new URL(value);
-        return u.protocol === "http:" || u.protocol === "https:";
-    } catch (_e) {
-        return false;
-    }
+    return U.isValidHttpUrl(raw);
 }
 
 function validateInputs() {
@@ -289,7 +247,7 @@ function validateOrFocusFirstInvalid() {
 function buildSiriusHipUrl() {
     var protocol = window.location.protocol;
     var hostname = window.location.hostname;
-    var defaultSiriusHipHost = protocol + "//" + hostname + ":5001";
+    var defaultSiriusHipHost = protocol === "file:" || !hostname ? "http://localhost:5001" : protocol + "//" + hostname + ":5001";
 
     var siriusHipHost = normalizeBaseUrl(readValue("in-SiriusHipHost"), defaultSiriusHipHost);
     var uiAccessType = readValue("in-accessType") || "ohif";
@@ -367,7 +325,7 @@ function buildSiriusHipUrl() {
 function update_url() {
     var ohifProtocol = window.location.protocol;
     var ohifHostname = window.location.hostname;
-    var defaultOhifHost = ohifProtocol + "//" + ohifHostname + ":3000";
+    var defaultOhifHost = ohifProtocol === "file:" || !ohifHostname ? "http://localhost:3000" : ohifProtocol + "//" + ohifHostname + ":3000";
 
     var ohifHost = normalizeBaseUrl(readValue("in-OhifHost"), defaultOhifHost);
     var built = buildSiriusHipUrl();
@@ -416,12 +374,14 @@ document.addEventListener("change", function (e) {
 document.addEventListener("DOMContentLoaded", function () {
     var protocol = window.location.protocol;
     var hostname = window.location.hostname;
+    var defaultOhifHost = protocol === "file:" || !hostname ? "http://localhost:3000" : protocol + "//" + hostname + ":3000";
+    var defaultSiriusHipHost = protocol === "file:" || !hostname ? "http://localhost:5001" : protocol + "//" + hostname + ":5001";
 
     var ohifEl = document.getElementById("in-OhifHost");
-    if (ohifEl && !ohifEl.value) ohifEl.value = protocol + "//" + hostname + ":3000";
+    if (ohifEl && !ohifEl.value) ohifEl.value = defaultOhifHost;
 
     var siriusHipEl = document.getElementById("in-SiriusHipHost");
-    if (siriusHipEl && !siriusHipEl.value) siriusHipEl.value = protocol + "//" + hostname + ":5001";
+    if (siriusHipEl && !siriusHipEl.value) siriusHipEl.value = defaultSiriusHipHost;
 
     var btnLaunchSiriusHip = document.getElementById("btn-launch-sirius-hip");
     if (btnLaunchSiriusHip) {
