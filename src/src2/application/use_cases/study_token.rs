@@ -848,7 +848,7 @@ pub async fn execute_study_token(
 
 
         let access_type = AccessType::from_param(params.access_type.as_str())
-            .ok_or(AppError::BadRequest)?;
+            .ok_or_else(|| AppError::bad_request("missing required parameter"))?;
 
 
         // --------------------------------------------------------------
@@ -857,7 +857,10 @@ pub async fn execute_study_token(
         let jwt_claims: Option<AuthClaims> = match settings.jwt_auth {
             JwtAuthMethod::None => None,
             JwtAuthMethod::Standard | JwtAuthMethod::OneTime => {
-                let token = params.token.as_ref().ok_or(AppError::Unauthorized)?;
+                let token = params
+                    .token
+                    .as_ref()
+                    .ok_or_else(|| AppError::unauthorized("missing token"))?;
                 Some(auth::validate_jwt_token(token, settings.as_ref())?)
             }
         };
@@ -865,8 +868,13 @@ pub async fn execute_study_token(
         // Enforce strict one-time semantics for the /studyToken JWT.
         // This is intentionally done early to avoid expensive PACS queries for already-used tokens.
         if matches!(settings.jwt_auth, JwtAuthMethod::OneTime) {
-            let token = params.token.as_deref().ok_or(AppError::Unauthorized)?;
-            let claims = jwt_claims.as_ref().ok_or(AppError::Unauthorized)?;
+            let token = params
+                .token
+                .as_deref()
+                .ok_or_else(|| AppError::unauthorized("missing token"))?;
+            let claims = jwt_claims
+                .as_ref()
+                .ok_or_else(|| AppError::unauthorized("invalid token"))?;
             session_repo.claim_one_time_token(token, claims.exp).await?;
         }
 
@@ -934,7 +942,9 @@ pub async fn execute_study_token(
         let mut persisted_files_for_zip: Option<Vec<DownloadSessionFile>> = None;
 
         if matches!(settings.jwt_auth, JwtAuthMethod::OneTime) {
-            let claims = jwt_claims.as_ref().ok_or(AppError::Unauthorized)?;
+            let claims = jwt_claims
+                .as_ref()
+                .ok_or_else(|| AppError::unauthorized("invalid token"))?;
 
             let new_session_id = Uuid::new_v4().to_string();
             let expires_at = DateTime::<Utc>::from_timestamp(claims.exp as i64, 0)
@@ -991,7 +1001,7 @@ pub async fn execute_study_token(
                 exp = exp.min(claims.exp);
             }
             if exp <= now {
-                return Err(AppError::Unauthorized);
+                return Err(AppError::unauthorized("unauthorized"));
             }
 
             let mut urls = Vec::with_capacity(rows.len());
@@ -1006,7 +1016,7 @@ pub async fn execute_study_token(
                     relative_file_path: r.relative_file_path.clone(),
                 };
                 let token = auth::encode_download_token(&claims, settings.as_ref())
-                    .map_err(|_| AppError::Unauthorized)?;
+                    .map_err(|_| AppError::unauthorized("unauthorized"))?;
                 let url = format!("{}/files/{}", base_url, token);
                 urls.push(url.clone());
             }

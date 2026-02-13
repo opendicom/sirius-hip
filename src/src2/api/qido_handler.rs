@@ -18,6 +18,12 @@ pub async fn qido_studies_handler(
 ) -> Result<HttpResponse, AppError> {
     let params = params.into_inner();
 
-    let qido = execute_qido_studies(params, &state).await?;
+    let qido = execute_qido_studies(
+        params, 
+        state.pacs.study_repo.clone(),
+        state.download_session_repo.clone(),
+        state.settings.clone()
+    ).await?;
+    
     Ok(HttpResponse::Ok().json(qido))
 }

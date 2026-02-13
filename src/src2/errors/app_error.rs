@@ -6,7 +6,7 @@ pub enum AppError {
     // ---------- Request ----------
 
     #[error("bad request")]
-    BadRequest,
+    BadRequest { reason: String },
 
     // ---------- Download session ----------
 
@@ -25,7 +25,7 @@ pub enum AppError {
     // ---------- Authentication ----------
 
     #[error("unauthorized")]
-    Unauthorized,
+    Unauthorized { reason: String },
 
     #[error("invalid or expired jwt token")]
     InvalidJwt(#[from] jsonwebtoken::errors::Error),
@@ -64,15 +64,16 @@ use actix_web::{
     http::StatusCode,
 };
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::src2::errors::PacsError;
 
 impl ResponseError for AppError {
     fn status_code(&self) -> StatusCode {
         match self {
-            AppError::BadRequest => StatusCode::BAD_REQUEST,
+            AppError::BadRequest { .. } => StatusCode::BAD_REQUEST,
 
-            AppError::Unauthorized 
+            AppError::Unauthorized { .. }
             | AppError::InvalidJwt(_) => StatusCode::UNAUTHORIZED,
 
             AppError::TokenAlreadyUsed => StatusCode::CONFLICT,
@@ -96,29 +97,53 @@ impl ResponseError for AppError {
 
     fn error_response(&self) -> HttpResponse {
         let status = self.status_code();
+        let error_id = Uuid::new_v4().to_string();
 
         // Log everything, but do not leak internals to clients.
         match status.as_u16() {
-            500..=599 => log::error!("{status}\n {:#?}", self),
-            400..=499 => log::warn!("{status}\n {:#?}", self),
-            _ => log::info!("{status} {:?}", self),
+            500..=599 => log::error!("{status} [{error_id}]\n{:#?}", self),
+            400..=499 => log::warn!("{status} [{error_id}]\n{:#?}", self),
+            _ => log::info!("{status} [{error_id}] {:?}", self),
         }
 
         let (code, message) = match self {
-            AppError::BadRequest => ("BAD_REQUEST", "bad request".to_string()),
-
-            AppError::Unauthorized => ("UNAUTHORIZED", "unauthorized".to_string()),
-            AppError::InvalidJwt(_) => ("INVALID_JWT", "invalid or expired jwt token".to_string()),
-            AppError::TokenAlreadyUsed => ("TOKEN_USED", "one-time token already used".to_string()),
-            AppError::OneTimeTokenStoreUnsupported => (
-                "ONE_TIME_TOKEN_STORE_UNSUPPORTED",
-                "one-time token store not supported by this backend".to_string(),
+            AppError::BadRequest { reason } => (
+                "BAD_REQUEST",
+                if reason.trim().is_empty() { "bad request".to_string() } else { reason.clone() },
             ),
 
-            AppError::DownloadSessionNotFound => ("SESSION_NOT_FOUND", "download session not found".to_string()),
-            AppError::DownloadSessionExpired => ("SESSION_EXPIRED", "download session expired".to_string()),
-            AppError::FileIndexNotFound(_) => ("FILE_NOT_FOUND", "file not found in download session".to_string()),
-            AppError::FileAlreadyDownloaded(_) => ("ALREADY_DOWNLOADED", "file already downloaded".to_string()),
+            AppError::Unauthorized { reason } => (
+                "UNAUTHORIZED",
+                if reason.trim().is_empty() { "unauthorized".to_string() } else { reason.clone() },
+            ),
+
+            AppError::InvalidJwt(_) => (
+                "INVALID_JWT", "invalid or expired jwt token".to_string()
+            ),
+            
+            AppError::TokenAlreadyUsed => (
+                "TOKEN_USED", "one-time token already used".to_string()
+            ),
+            
+            AppError::OneTimeTokenStoreUnsupported => (
+                "ONE_TIME_TOKEN_STORE_UNSUPPORTED", "one-time token store not supported by this backend".to_string(),
+            ),
+
+            AppError::DownloadSessionNotFound => (
+                "SESSION_NOT_FOUND", "download session not found".to_string()
+            ),
+            
+            AppError::DownloadSessionExpired => (
+                "SESSION_EXPIRED", "download session expired".to_string()
+            ),
+            
+            AppError::FileIndexNotFound(_) => (
+                "FILE_NOT_FOUND", "file not found in download session".to_string()
+            ),
+            
+            AppError::FileAlreadyDownloaded(_) => (
+                "ALREADY_DOWNLOADED", "file already downloaded".to_string()
+            ),
 
             // Internal / infrastructure
             AppError::Database(_)
@@ -127,11 +152,24 @@ impl ResponseError for AppError {
             | AppError::Pacs(_) => ("INTERNAL", "internal error".to_string()),
         };
 
-        HttpResponse::build(status).json(json!({
+        HttpResponse::build(status)
+            .insert_header(("X-Error-Id", error_id.clone()))
+            .json(json!({
             "error": {
+                "id": error_id,
                 "code": code,
                 "message": message,
             }
         }))
+    }
+}
+
+impl AppError {
+    pub fn bad_request(reason: impl Into<String>) -> Self {
+        Self::BadRequest { reason: reason.into() }
+    }
+
+    pub fn unauthorized(reason: impl Into<String>) -> Self {
+        Self::Unauthorized { reason: reason.into() }
     }
 }

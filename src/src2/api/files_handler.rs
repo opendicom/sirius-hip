@@ -67,7 +67,7 @@ pub async fn download_token_handler(
 ) -> Result<HttpResponse, AppError> {
     let token = path.into_inner();
     let claims = auth::validate_download_token(&token, &state.settings)
-        .map_err(|_| AppError::Unauthorized)?;
+        .map_err(|_| AppError::unauthorized("unauthorized"))?;
 
     
     // --------------------------------------------------------------

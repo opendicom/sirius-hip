@@ -198,7 +198,12 @@ async fn main() -> anyhow::Result<()> {
     let qido_qs = QueryStringConfig::default()
         .parse_mode(ParseMode::Duplicate) // <- choose the parsing mode
         .error_handler(|err, _req| {  // <- create custom error response
-            actix_web::error::ErrorBadRequest(err)
+            // Keep client-facing errors sanitized and consistent.
+            actix_web::error::InternalError::from_response(
+                err,
+                AppError::bad_request("invalid query parameters").error_response(),
+            )
+            .into()
         });
 
 
@@ -218,7 +223,9 @@ async fn main() -> anyhow::Result<()> {
 
         let mut app = App::new()
             .wrap(cors)
-            .wrap(Logger::default())
+            .wrap(Logger::new(
+                "%a \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" %T %{X-Error-Id}o",
+            ))
             //.wrap(Logger::new("%a %{User-Agent}i"))
             .wrap(middleware::Compress::default())
             .app_data(app_state.clone())
@@ -243,7 +250,7 @@ async fn main() -> anyhow::Result<()> {
                     // AppError logs the detail (we only emit a generic 400).
                     actix_web::error::InternalError::from_response(
                         err,
-                        AppError::BadRequest.error_response(),
+                        AppError::bad_request("invalid query parameters").error_response(),
                     )
                     .into()
                 }))

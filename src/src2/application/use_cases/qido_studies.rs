@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use dicom_core::value::PrimitiveValue;
 use dicom_core::{DataElement, Tag, VR};
@@ -7,13 +8,16 @@ use dicom_object::InMemDicomObject;
 use log::error;
 
 use crate::api::qido::QidoStudiesParams;
+use crate::auth::{self, AuthClaims};
 use crate::constants::QIDO_STUDY_INCLUDEFIELD_DIC;
 use crate::models::qido::Qido;
+use crate::settings::{JwtAuthMethod, Settings};
+use crate::src2::application::repositories::DownloadSessionRepository;
 use crate::src2::errors::app_error::AppError;
+use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::repositories::study_repository::{
     QidoStudiesIncludeFields, QidoStudiesQuery,
 };
-use crate::src2::state2::AppState2;
 
 fn to_dicom_date(date: &str) -> String {
     date.chars().filter(|c| c.is_ascii_digit()).collect()
@@ -25,10 +29,41 @@ fn to_dicom_time(time: &str) -> String {
 
 pub async fn execute_qido_studies(
     params: QidoStudiesParams,
-    state: &AppState2,
+    study_repo: Arc<dyn StudyRepository>,
+    session_repo: Arc<dyn DownloadSessionRepository>,
+    settings: Arc<Settings>
 ) -> Result<Qido, AppError> {
+
     // --------------------------------------------------------------
-    // 1. VALIDATE `includefield` PARAMETERS
+    // 1. VALIDATE JWT TOKEN
+    // --------------------------------------------------------------
+    let jwt_claims: Option<AuthClaims> = match settings.jwt_auth {
+        JwtAuthMethod::None => None,
+        JwtAuthMethod::Standard | JwtAuthMethod::OneTime => {
+            let token = params
+                .token
+                .as_ref()
+                .ok_or_else(|| AppError::unauthorized("missing token"))?;
+            Some(auth::validate_jwt_token(token, settings.as_ref())?)
+        }
+    };
+
+    // Enforce strict one-time semantics for the /qido/studies JWT.
+    // This is intentionally done early to avoid expensive PACS queries for already-used tokens.
+    if matches!(settings.jwt_auth, JwtAuthMethod::OneTime) {
+        let token = params
+            .token
+            .as_deref()
+            .ok_or_else(|| AppError::unauthorized("missing token"))?;
+        let claims = jwt_claims
+            .as_ref()
+            .ok_or_else(|| AppError::unauthorized("invalid token"))?;
+        session_repo.claim_one_time_token(token, claims.exp).await?;
+    }
+
+    
+    // --------------------------------------------------------------
+    // 2. VALIDATE `includefield` PARAMETERS
     // --------------------------------------------------------------
 
     let mut validated_include_fields: HashSet<&'static str> = HashSet::new();
@@ -39,7 +74,7 @@ pub async fn execute_qido_studies(
                 validated_include_fields.insert(*tag);
             } else {
                 error!("Invalid includefield parameter: {field}");
-                return Err(AppError::BadRequest);
+                return Err(AppError::bad_request("invalid includefield"));
             }
         }
     }
@@ -50,14 +85,14 @@ pub async fn execute_qido_studies(
         includefield_00100021: validated_include_fields.contains("00100021"),
     };
 
-    let limit = params.limit.unwrap_or(state.settings.max_default);
+    let limit = params.limit.unwrap_or(settings.max_default);
 
     // --------------------------------------------------------------
-    // 2. BUILD REPOSITORY QUERY
+    // 3. BUILD REPOSITORY QUERY
     // --------------------------------------------------------------
 
     let repo_query = QidoStudiesQuery {
-        metadata_overrides: state.settings.dicomarchive.metadata_overrides.as_deref(),
+        metadata_overrides: settings.dicomarchive.metadata_overrides.as_deref(),
         patient_id: params.patient_id.as_deref(),
         patient_name: params.patient_name.as_deref(),
         referring_physician_name: params.referring_physician_name.as_deref(),
@@ -72,17 +107,15 @@ pub async fn execute_qido_studies(
     };
 
     // --------------------------------------------------------------
-    // 3. FETCH STUDY ROWS FROM REPOSITORY
+    // 4. FETCH STUDY ROWS FROM REPOSITORY
     // --------------------------------------------------------------
-    let rows = state
-        .pacs
-        .study_repo
+    let rows = study_repo
         .fetch_qido_studies_rows(repo_query, include)
         .await
         .map_err(AppError::Pacs)?;
 
     // --------------------------------------------------------------
-    // 4. CONVERT ROWS TO DICOM JSON
+    // 5. CONVERT ROWS TO DICOM JSON
     // --------------------------------------------------------------
 
     let mut qido = Qido::new();
