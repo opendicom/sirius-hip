@@ -38,9 +38,6 @@ pub struct MySqlDownloadSessionRepository {
 }
 
 impl MySqlDownloadSessionRepository {
-    pub async fn new(pool: MySqlPool) -> Result<Self, AppError> {
-        Self::new_with_config(pool, CleanupConfig::default()).await
-    }
 
     pub async fn new_with_config(pool: MySqlPool, cleanup_cfg: CleanupConfig) -> Result<Self, AppError> {
 

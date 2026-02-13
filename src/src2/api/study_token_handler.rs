@@ -4,6 +4,7 @@ use crate::api::study_token::params::StudyTokenParams;
 use crate::src2::application::use_cases::{execute_study_token, StudyTokenOutput};
 use crate::src2::errors::app_error::AppError;
 use crate::src2::state2::AppState2;
+use super::extract_token_from_headers;
 
 // =============================================================================================== //
 // HTTP HANDLER - /studyToken                                                                      //
@@ -29,6 +30,15 @@ pub async fn study_token_handler(
         conn.scheme(),
         conn.host(),
     );
+
+
+    // --------------------------------------------------------------
+    // 2. EXTRACT TOKEN (headers first, then query param)
+    // --------------------------------------------------------------
+    let mut params = params.into_inner();
+    if let Some(token) = extract_token_from_headers(&req)? {
+        params.token = Some(token);
+    }
     
     
     // --------------------------------------------------------------
@@ -39,7 +49,7 @@ pub async fn study_token_handler(
         state.download_session_repo.clone(),
         state.tmp_pool.clone(),
         state.settings.clone(),
-        params.into_inner(),
+        params,
         &server_base_url,
     )
     .await?;

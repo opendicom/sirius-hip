@@ -8,6 +8,11 @@ function readValue(id) {
     return U.readValue(id);
 }
 
+function readChecked(id) {
+    var el = document.getElementById(id);
+    return !!(el && el.checked);
+}
+
 function openInNewTab(url) {
     return U.openInNewTab(url);
 }
@@ -256,9 +261,6 @@ function buildSiriusHipUrl() {
     var url = new URL("/studyToken", siriusHipHost);
     url.searchParams.set("accessType", serverAccessType);
 
-    var token = readValue("in-token");
-    if (token) url.searchParams.set("token", token);
-
     var session = readValue("in-session");
     if (session) url.searchParams.set("session", session);
 
@@ -316,9 +318,15 @@ function buildSiriusHipUrl() {
     var SOPClassOff = readValue("in-SOPClassOff");
     if (SOPClassOff) url.searchParams.set("SOPClassOff", SOPClassOff);
 
+    var token = readValue("in-token");
+    var curlUrl = url.toString();
+    if (token && readChecked("in-token-in-query")) url.searchParams.set("token", token);
+
     return {
         uiAccessType: uiAccessType,
         siriusHipUrl: url.toString(),
+        curlUrl: curlUrl,
+        token: token,
     };
 }
 
@@ -353,6 +361,13 @@ function update_url() {
 
     var siriusHipUrlEl = document.getElementById("sirius-hip-url");
     if (siriusHipUrlEl) siriusHipUrlEl.value = built.siriusHipUrl;
+
+    var curlEl = document.getElementById("curl");
+    if (curlEl) {
+        var curl = "curl -G \"" + built.curlUrl + "\"";
+        if (built.token) curl += " -H \"Authorization: Bearer " + built.token + "\"";
+        curlEl.value = curl;
+    }
 
     var urlEl = document.getElementById("url");
     if (urlEl) urlEl.value = value;
@@ -418,6 +433,17 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!validateOrFocusFirstInvalid()) return;
             var ok = await copyToClipboard(readValue("url"));
             if (ok) flashCopied(btnCopyUrl);
+        });
+    }
+
+    var btnCopyCurl = document.getElementById("btn-copy-curl");
+    if (btnCopyCurl) {
+        btnCopyCurl.addEventListener("click", async function () {
+            update_url();
+            if (!validateOrFocusFirstInvalid()) return;
+            var curlEl = document.getElementById("curl");
+            var ok = await copyToClipboard(curlEl ? curlEl.value : "");
+            if (ok) flashCopied(btnCopyCurl);
         });
     }
 

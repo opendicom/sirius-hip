@@ -42,7 +42,16 @@ Plus:
 - `includefield`: repeated key supported (querystring duplicate parsing)
 - `limit`, `offset`
 - `fuzzymatching` (currently ignored)
-- `token` (currently ignored)
+- `token` (JWT auth; see Token transport)
+
+## Token transport
+
+When `settings.jwt_auth` is `standard` or `onetime`, a valid JWT is required and can be sent either:
+
+- Preferred: HTTP header `Authorization: Bearer <token>`
+- Compatibility fallback: query parameter `token=...`
+
+No other custom headers are supported for JWT.
 
 ### Wildcard matching
 
@@ -135,6 +144,7 @@ Postgres repositories exist as stubs and return an `UnsupportedDatabase("postgre
 
 ```bash
 curl -G "http://localhost:5001/qido/studies" \
+   -H "Authorization: Bearer ..." \
   -H "content-type: application/json" \
   --data-urlencode "PatientID=123" \
   --data-urlencode "limit=50"
@@ -144,6 +154,7 @@ curl -G "http://localhost:5001/qido/studies" \
 
 ```bash
 curl -G "http://localhost:5001/qido/studies" \
+   -H "Authorization: Bearer ..." \
   -H "content-type: application/json" \
   --data-urlencode "PatientID=123" \
   --data-urlencode "includefield=StudyDescription" \
@@ -154,4 +165,4 @@ curl -G "http://localhost:5001/qido/studies" \
 
 - `/qido/series` and `/qido/instances` are not implemented in src2 yet.
 - `RetrieveURL (0008,1190)` is returned as empty.
-- `fuzzymatching` and `token` are currently ignored.
+- `fuzzymatching` is currently ignored.

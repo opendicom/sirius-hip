@@ -16,7 +16,7 @@ Resolves a study query and returns a viewer-specific payload (JSON, XML, or ZIP 
 The request is parsed using `StudyTokenParams`:
 
 - Operation-level:
-  - `token`: optional JWT token, required when `settings.jwt_auth` is `standard` or `onetime`
+  - `token`: optional JWT token (query parameter fallback). When `settings.jwt_auth` is `standard` or `onetime`, a valid JWT is required and should be provided via `Authorization: Bearer <token>`.
   - `session`: optional, passed through to some viewer outputs
   - `institution`: optional tenant filter
   - `proxyURI`: optional base URL used to build absolute download URLs
@@ -60,16 +60,25 @@ The request is parsed using `StudyTokenParams`:
 
 ### 2) `standard`
 
-- The JWT `token` query parameter is required and validated.
+- A valid JWT is required and validated (see Token transport).
 - Download URLs still use **stateless signed download tokens**:
   - `GET /files/{token}`
 
 ### 3) `onetime`
 
-- The JWT `token` query parameter is required and validated.
+- A valid JWT is required and validated (see Token transport).
 - `/studyToken` creates a **download session** in the *application DB*.
 - Viewer payloads use **session-backed** enforced URLs:
   - `GET /files/{session_id}/{file_index}`
+
+## Token transport
+
+When `settings.jwt_auth` is `standard` or `onetime`, the JWT can be sent either:
+
+- Preferred: HTTP header `Authorization: Bearer <token>`
+- Compatibility fallback: query parameter `token=...`
+
+No other custom headers are supported for JWT.
 
 The key design requirement is that **generated URLs always hit an application endpoint**. The application decides at request time whether to serve bytes from the filesystem or proxy from WADO-URI.
 
@@ -184,7 +193,7 @@ curl -G "http://localhost:5001/studyToken" \
 curl -G "http://localhost:5001/studyToken" \
   --data-urlencode "accessType=ohif" \
   --data-urlencode "PatientID=123" \
-  --data-urlencode "token=..."
+  -H "Authorization: Bearer ..."
 ```
 
 The response will contain URLs of the form:

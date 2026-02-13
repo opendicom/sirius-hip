@@ -27,6 +27,10 @@
         Wildcards: use <code>*</code> (any sequence) and <code>?</code> (one char). Without wildcards, values are treated as exact matches.
       </div>
 
+      <div class="alert alert-secondary">
+        Auth (when enabled): use <code>Authorization: Bearer &lt;token&gt;</code>. For browser-based testing, you may include <code>token=...</code> in the URL.
+      </div>
+
       <div class="row g-3">
         <div class="col-12 col-lg-6">
           <div class="card">
@@ -34,6 +38,20 @@
             <div class="card-body">
               <label class="form-label" for="in-SiriusHipHost">Sirius HIP host</label>
               <input id="in-SiriusHipHost" class="form-control" type="text" placeholder="https://host:5001" />
+
+              <div class="row g-2 mt-2">
+                <div class="col-12 col-md-8">
+                  <label class="form-label" for="in-token">JWT token</label>
+                  <input id="in-token" class="form-control" type="text" placeholder="(optional)" />
+                  <div class="form-text">Used as <code>Authorization: Bearer</code> in the generated curl command.</div>
+                </div>
+                <div class="col-12 col-md-4 d-flex align-items-end">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="in-token-in-query" checked />
+                    <label class="form-check-label" for="in-token-in-query">Include <code>token</code> in URL</label>
+                  </div>
+                </div>
+              </div>
 
               <div class="row g-2 mt-2">
                 <div class="col-6">

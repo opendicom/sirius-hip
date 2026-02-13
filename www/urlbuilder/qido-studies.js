@@ -49,17 +49,34 @@ function buildUrl() {
   if (U.readChecked("in-include-SOPClassesInStudy")) url.searchParams.append("includefield", "SOPClassesInStudy");
   if (U.readChecked("in-include-IssuerOfPatientID")) url.searchParams.append("includefield", "IssuerOfPatientID");
 
+  var token = U.readValue("in-token");
+  var tokenInQuery = U.readChecked("in-token-in-query");
+  if (token && tokenInQuery) url.searchParams.set("token", token);
+
   return url.toString();
 }
 
 function updateOut() {
   var errors = validateInputs();
   var url = buildUrl();
+  var token = U.readValue("in-token");
 
   var outUrl = document.getElementById("out-url");
   if (outUrl) outUrl.value = url;
 
-  var curl = "curl -G \"" + url + "\" -H \"content-type: application/json\"";
+  var curlUrl = url;
+  if (token) {
+    try {
+      var u = new URL(url);
+      u.searchParams.delete("token");
+      curlUrl = u.toString();
+    } catch (_e) {
+      // keep original
+    }
+  }
+
+  var curl = "curl -G \"" + curlUrl + "\" -H \"content-type: application/json\"";
+  if (token) curl += " -H \"Authorization: Bearer " + token + "\"";
   var outCurl = document.getElementById("out-curl");
   if (outCurl) outCurl.textContent = curl;
 
