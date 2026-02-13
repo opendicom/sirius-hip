@@ -18,7 +18,6 @@ pub struct QidoStudyRow {
     pub mods_in_study: Option<String>,
     pub study_iuid: String,
     pub study_id: Option<String>,
-    pub study_desc: Option<String>,
     pub ref_physician: Option<String>,
     pub num_instances: i64,
     pub num_series: i64,
