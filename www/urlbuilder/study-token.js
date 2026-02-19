@@ -17,6 +17,16 @@ function openInNewTab(url) {
     return U.openInNewTab(url);
 }
 
+function updateBuiltUrlBarPadding() {
+    var bar = document.querySelector("nav.navbar.fixed-bottom");
+    if (!bar) return;
+
+    var h = bar.offsetHeight || 0;
+    if (h > 0) {
+        document.documentElement.style.setProperty("--built-url-bar-height", h + "px");
+    }
+}
+
 async function copyToClipboard(text) {
     return await U.copyToClipboard(text);
 }
@@ -258,7 +268,7 @@ function buildSiriusHipUrl() {
     var uiAccessType = readValue("in-accessType") || "ohif";
     var serverAccessType = uiAccessType === "osirix" ? "dicom.zip" : uiAccessType;
 
-    var url = new URL("/studyToken", siriusHipHost);
+    var url = U.urlWithPath(siriusHipHost, "studyToken");
     url.searchParams.set("accessType", serverAccessType);
 
     var session = readValue("in-session");
@@ -319,14 +329,11 @@ function buildSiriusHipUrl() {
     if (SOPClassOff) url.searchParams.set("SOPClassOff", SOPClassOff);
 
     var token = readValue("in-token");
-    var curlUrl = url.toString();
     if (token && readChecked("in-token-in-query")) url.searchParams.set("token", token);
 
     return {
         uiAccessType: uiAccessType,
         siriusHipUrl: url.toString(),
-        curlUrl: curlUrl,
-        token: token,
     };
 }
 
@@ -362,13 +369,6 @@ function update_url() {
     var siriusHipUrlEl = document.getElementById("sirius-hip-url");
     if (siriusHipUrlEl) siriusHipUrlEl.value = built.siriusHipUrl;
 
-    var curlEl = document.getElementById("curl");
-    if (curlEl) {
-        var curl = "curl -G \"" + built.curlUrl + "\"";
-        if (built.token) curl += " -H \"Authorization: Bearer " + built.token + "\"";
-        curlEl.value = curl;
-    }
-
     var urlEl = document.getElementById("url");
     if (urlEl) urlEl.value = value;
 }
@@ -387,6 +387,7 @@ document.addEventListener("change", function (e) {
 });
 
 document.addEventListener("DOMContentLoaded", function () {
+    updateBuiltUrlBarPadding();
     var protocol = window.location.protocol;
     var hostname = window.location.hostname;
     var defaultOhifHost = protocol === "file:" || !hostname ? "http://localhost:3000" : protocol + "//" + hostname + ":3000";
@@ -436,18 +437,24 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    var btnCopyCurl = document.getElementById("btn-copy-curl");
-    if (btnCopyCurl) {
-        btnCopyCurl.addEventListener("click", async function () {
-            update_url();
-            if (!validateOrFocusFirstInvalid()) return;
-            var curlEl = document.getElementById("curl");
-            var ok = await copyToClipboard(curlEl ? curlEl.value : "");
-            if (ok) flashCopied(btnCopyCurl);
-        });
-    }
-
     update_url();
+
+    var resizeTimer;
+    window.addEventListener("resize", function () {
+        window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(updateBuiltUrlBarPadding, 100);
+    });
+
+    if (window.ResizeObserver) {
+        var bar = document.querySelector("nav.navbar.fixed-bottom");
+        if (bar) {
+            try {
+                new ResizeObserver(updateBuiltUrlBarPadding).observe(bar);
+            } catch (_e) {
+                // ignore
+            }
+        }
+    }
 });
 
 function launch() {

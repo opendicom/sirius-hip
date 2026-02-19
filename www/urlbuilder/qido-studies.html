@@ -3,26 +3,117 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sirius HIP - QIDO /studies URL builder</title>
+    <meta name="description" content="" />
+    <title>Sirius HIP - /qido/studies URL builder</title>
     <link href="../shared/bootstrap/css/bootstrap.min.css" rel="stylesheet" />
     <link href="../shared/main.css" rel="stylesheet" />
     <style>
+      :root {
+        --built-url-bar-height: 220px;
+        --built-url-bar-gap: 12px;
+      }
+      body { padding-bottom: calc(var(--built-url-bar-height) + var(--built-url-bar-gap)); }
       pre { white-space: pre-wrap; }
+      .navbar-brand code { font-size: 1em; }
+      .bi { display: inline-block; vertical-align: -0.125em; line-height: 1; }
+      .btn-back { display: inline-flex; align-items: center; white-space: nowrap; }
+      .bi-arrow-left::before {
+        content: "";
+        display: inline-block;
+        width: 1em;
+        height: 1em;
+        background-color: currentColor;
+        -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%3E%3Cpath%20fill-rule%3D'evenodd'%20d%3D'M15%208a.5.5%200%200%200-.5-.5H2.707l3.147-3.146a.5.5%200%201%200-.708-.708l-4%204a.5.5%200%200%200%200%20.708l4%204a.5.5%200%200%200%20.708-.708L2.707%208.5H14.5A.5.5%200%200%200%2015%208'/%3E%3C/svg%3E") no-repeat 50% 50%;
+        -webkit-mask-size: 100% 100%;
+        mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%3E%3Cpath%20fill-rule%3D'evenodd'%20d%3D'M15%208a.5.5%200%200%200-.5-.5H2.707l3.147-3.146a.5.5%200%201%200-.708-.708l-4%204a.5.5%200%200%200%200%20.708l4%204a.5.5%200%200%200%20.708-.708L2.707%208.5H14.5A.5.5%200%200%200%2015%208'/%3E%3C/svg%3E") no-repeat 50% 50%;
+        mask-size: 100% 100%;
+      }
     </style>
+    <script src="../shared/bootstrap/js/color-modes.js"></script>
     <script src="../shared/urlbuilder.js"></script>
-    <script src="./qido-studies.js"></script>
+    <script src="qido-studies.js"></script>
   </head>
   <body class="bg-body">
-    <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom">
+
+    <svg xmlns="http://www.w3.org/2000/svg" class="d-none">
+      <symbol id="check2" viewBox="0 0 16 16">
+        <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+      </symbol>
+      <symbol id="circle-half" viewBox="0 0 16 16">
+        <path d="M8 15A7 7 0 1 0 8 1v14zm0 1A8 8 0 1 1 8 0a8 8 0 0 1 0 16z"/>
+      </symbol>
+      <symbol id="moon-stars-fill" viewBox="0 0 16 16">
+        <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
+        <path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.156 1.156 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.156 1.156 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732L13.863.1z"/>
+      </symbol>
+      <symbol id="sun-fill" viewBox="0 0 16 16">
+        <path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/>
+      </symbol>
+    </svg>
+
+        <nav class="navbar navbar-expand-lg bg-body-tertiary">
       <div class="container-fluid">
-        <a class="navbar-brand" href="../index.html">Sirius HIP - QIDO /studies URL builder</a>
-        <div class="d-flex gap-2">
-          <a class="btn btn-outline-secondary btn-sm" href="study-token.html">StudyToken builder</a>
+        <a class="navbar-brand d-flex align-items-center gap-2" href="../index.html">
+          <img src="../shared/logo.png" alt="Logo" width="40" height="40" class="d-block flex-shrink-0" />
+          Sirius HIP - <code>/qido/studies</code> URL builder
+        </a>
+
+        <div class="d-flex align-items-center gap-2">
+          <a class="btn btn-outline-secondary btn-sm btn-back" href="../index.html" title="Back to URL builders"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Back</a>
+
+          <div class="dropdown bd-mode-toggle">
+            <button class="btn btn-link nav-link py-2 px-0 px-lg-2 dropdown-toggle d-flex align-items-center"
+                    id="bd-theme"
+                    type="button"
+                    aria-expanded="false"
+                    data-bs-toggle="dropdown"
+                    aria-label="Toggle theme (auto)">
+              <svg class="bi my-1 theme-icon-active" width="1em" height="1em"><use href="#circle-half"></use></svg>
+              <span class="visually-hidden" id="bd-theme-text">Toggle theme</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="bd-theme-text">
+              <li>
+                <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="light" aria-pressed="false">
+                  <svg class="bi me-2 opacity-50 theme-icon" width="1em" height="1em"><use href="#sun-fill"></use></svg>
+                  Light
+                  <svg class="bi ms-auto d-none" width="1em" height="1em"><use href="#check2"></use></svg>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="dark" aria-pressed="false">
+                  <svg class="bi me-2 opacity-50 theme-icon" width="1em" height="1em"><use href="#moon-stars-fill"></use></svg>
+                  Dark
+                  <svg class="bi ms-auto d-none" width="1em" height="1em"><use href="#check2"></use></svg>
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item d-flex align-items-center active" data-bs-theme-value="auto" aria-pressed="true">
+                  <svg class="bi me-2 opacity-50 theme-icon" width="1em" height="1em"><use href="#circle-half"></use></svg>
+                  Auto
+                  <svg class="bi ms-auto d-none" width="1em" height="1em"><use href="#check2"></use></svg>
+                </button>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </nav>
 
     <div class="container-fluid px-4 py-4">
+      <p>
+        <b>Sirius HIP - <code>/qido/studies</code> URL builder</b> is a tool to help you build and test QIDO-RS study queries against Sirius HIP.
+        Keep in mind that Sirius HIP must be previously configured correctly as well as the viewers that use it.
+        If you are trying to configure Sirius HIP or any DICOM Viewer for the first time, please go to the configuration section in the online documentation.
+      </p>
+      <p class="mb-2">Options allowed to test:</p>
+      <ul>
+        <li>Common QIDO filters like <code>PatientID</code>, <code>PatientName</code>, <code>StudyDate</code>, etc.</li>
+          <li>Multiple UIDs in <code>StudyInstanceUID</code>, separated by <code>\</code> (backslash).</li>
+        <li>Pagination with <code>limit</code> and <code>offset</code>.</li>
+        <li>Extra metadata via <code>includefield</code> options.</li>
+        <li>Browser/viewer testing with optional <code>token=...</code> as a fallback.</li>
+      </ul>
+
       <div class="alert alert-info">
         Wildcards: use <code>*</code> (any sequence) and <code>?</code> (one char). Without wildcards, values are treated as exact matches.
       </div>
@@ -43,12 +134,12 @@
                 <div class="col-12 col-md-8">
                   <label class="form-label" for="in-token">JWT token</label>
                   <input id="in-token" class="form-control" type="text" placeholder="(optional)" />
-                  <div class="form-text">Used as <code>Authorization: Bearer</code> in the generated curl command.</div>
+                  <div class="form-text">Preferred transport is <code>Authorization: Bearer</code> (see docs). This checkbox exists mainly for browser/viewer testing.</div>
                 </div>
                 <div class="col-12 col-md-4 d-flex align-items-end">
                   <div class="form-check">
                     <input class="form-check-input" type="checkbox" id="in-token-in-query" checked />
-                    <label class="form-check-label" for="in-token-in-query">Include <code>token</code> in URL</label>
+                    <label class="form-check-label" for="in-token-in-query">Include <code>token</code> in URL (fallback)</label>
                   </div>
                 </div>
               </div>
@@ -110,8 +201,8 @@
                 </div>
                 <div class="col-12 col-md-6">
                   <label class="form-label" for="in-StudyInstanceUID">StudyInstanceUID</label>
-                  <input id="in-StudyInstanceUID" class="form-control" type="text" placeholder="1.2.3.4\\5.6.7.8" />
-                  <div class="form-text">Multiple UIDs supported, separated by <code>\\</code> (exact values).</div>
+                  <input id="in-StudyInstanceUID" class="form-control" type="text" placeholder="1.2.3.4\5.6.7.8" />
+                  <div class="form-text">Multiple UIDs supported, separated by <code>\</code> (exact values).</div>
                 </div>
                 <div class="col-12 col-md-6">
                   <label class="form-label" for="in-StudyID">StudyID</label>
@@ -131,25 +222,37 @@
           </div>
         </div>
 
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header">Built URL</div>
-            <div class="card-body">
-              <div id="out-errors" class="alert alert-warning d-none" role="alert"></div>
-              <div class="input-group">
-                <input id="out-url" class="form-control" type="text" readonly />
-                <button id="btn-copy" class="btn btn-outline-secondary" type="button">Copy</button>
-                <button id="btn-open" class="btn btn-primary" type="button">Open</button>
-              </div>
-              <div class="mt-2">
-                <div class="form-label">curl</div>
-                <pre class="bg-body-tertiary border rounded p-2"><code id="out-curl"></code></pre>
-              </div>
-            </div>
+      </div>
+    </div>
+
+    <nav class="navbar navbar-expand-lg fixed-bottom p-4">
+      <div class="card w-100">
+        <div class="card-header">Built URL</div>
+        <div class="card-body">
+          <div id="validation-alert" class="alert alert-warning d-none" role="alert"></div>
+
+          <div class="input-group mb-2 pt-2">
+            <button id="btn-launch-url" type="button" class="btn btn-bd-primary" title="Open URL">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-rocket-takeoff me-2" viewBox="0 0 16 16">
+                <path d="M9.752 6.193c.599.6 1.73.437 2.528-.362s.96-1.932.362-2.531c-.599-.6-1.73-.438-2.528.361-.798.8-.96 1.933-.362 2.532"/>
+                <path d="M15.811 3.312c-.363 1.534-1.334 3.626-3.64 6.218l-.24 2.408a2.56 2.56 0 0 1-.732 1.526L8.817 15.85a.51.51 0 0 1-.867-.434l.27-1.899c.04-.28-.013-.593-.131-.956a9 9 0 0 0-.249-.657l-.082-.202c-.815-.197-1.578-.662-2.191-1.277-.614-.615-1.079-1.379-1.275-2.195l-.203-.083a10 10 0 0 0-.655-.248c-.363-.119-.675-.172-.955-.132l-1.896.27A.51.51 0 0 1 .15 7.17l2.382-2.386c.41-.41.947-.67 1.524-.734h.006l2.4-.238C9.005 1.55 11.087.582 12.623.208c.89-.217 1.59-.232 2.08-.188.244.023.435.06.57.093q.1.026.16.045c.184.06.279.13.351.295l.029.073a3.5 3.5 0 0 1 .157.721c.055.485.051 1.178-.159 2.065m-4.828 7.475.04-.04-.107 1.081a1.54 1.54 0 0 1-.44.913l-1.298 1.3.054-.38c.072-.506-.034-.993-.172-1.418a9 9 0 0 0-.164-.45c.738-.065 1.462-.38 2.087-1.006M5.205 5c-.625.626-.94 1.351-1.004 2.09a9 9 0 0 0-.45-.164c-.424-.138-.91-.244-1.416-.172l-.38.054 1.3-1.3c.245-.246.566-.401.91-.44l1.08-.107zm9.406-3.961c-.38-.034-.967-.027-1.746.163-1.558.38-3.917 1.496-6.937 4.521-.62.62-.799 1.34-.687 2.051.107.676.483 1.362 1.048 1.928.564.565 1.25.941 1.924 1.049.71.112 1.429-.067 2.048-.688 3.079-3.083 4.192-5.444 4.556-6.987.183-.771.18-1.345.138-1.713a3 3 0 0 0-.045-.283 3 3 0 0 0-.3-.041Z"/>
+                <path d="M7.009 12.139a7.6 7.6 0 0 1-1.804-1.352A7.6 7.6 0 0 1 3.794 8.86c-1.102.992-1.965 5.054-1.839 5.18.125.126 3.936-.896 5.054-1.902Z"/>
+              </svg>
+              Launch
+            </button>
+
+            <button id="btn-copy-url" type="button" class="btn btn-outline-secondary" aria-label="Copy URL" title="Copy URL">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-copy" viewBox="0 0 16 16">
+                <path fill-rule="evenodd" d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1z"/>
+              </svg>
+            </button>
+
+            <span class="input-group-text" id="basic-addon1" style="width: 8em;">Final URL:</span>
+            <input id="url" type="text" class="form-control" aria-describedby="basic-addon1" readonly />
           </div>
         </div>
       </div>
-    </div>
+    </nav>
 
     <script src="../shared/bootstrap/js/bootstrap.bundle.min.js"></script>
   </body>

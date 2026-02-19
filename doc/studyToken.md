@@ -82,6 +82,8 @@ No other custom headers are supported for JWT.
 
 The key design requirement is that **generated URLs always hit an application endpoint**. The application decides at request time whether to serve bytes from the filesystem or proxy from WADO-URI.
 
+Performance note: `/studyToken` rendering performs **no filesystem I/O**. It only uses the PACS database rows (`inst_attrs` and other columns). If some DICOM tags are missing from those blobs, the corresponding fields in the viewer payload are left null/empty.
+
 > Note: `settings.jwt_auth` is deserialized with `lowercase` names, so valid values in config are `none`, `standard`, `onetime`.
 
 ## Download endpoints (byte serving)

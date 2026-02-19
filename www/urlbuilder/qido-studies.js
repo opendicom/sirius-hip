@@ -1,5 +1,42 @@
 var U = window.SiriusHipUrlBuilder;
 
+function updateBuiltUrlBarPadding() {
+  var bar = document.querySelector("nav.navbar.fixed-bottom");
+  if (!bar) return;
+
+  var h = bar.offsetHeight || 0;
+  if (h > 0) {
+    document.documentElement.style.setProperty("--built-url-bar-height", h + "px");
+  }
+}
+
+function flashCopied(btn) {
+  if (!btn) return;
+  var oldTitle = btn.getAttribute("title") || "";
+  btn.setAttribute("title", "Copied");
+  btn.classList.add("btn-success");
+  btn.classList.remove("btn-outline-secondary");
+  window.setTimeout(function () {
+    btn.setAttribute("title", oldTitle);
+    btn.classList.remove("btn-success");
+    btn.classList.add("btn-outline-secondary");
+  }, 900);
+}
+
+function setValidationAlert(messages) {
+  var alertEl = document.getElementById("validation-alert");
+  if (!alertEl) return;
+
+  if (!messages || messages.length === 0) {
+    alertEl.classList.add("d-none");
+    alertEl.textContent = "";
+    return;
+  }
+
+  alertEl.classList.remove("d-none");
+  alertEl.textContent = messages.join("  ");
+}
+
 function validateInputs() {
   var errors = [];
 
@@ -22,7 +59,7 @@ function buildUrl() {
   var defaultHost = protocol === "file:" || !hostname ? "http://localhost:5001" : protocol + "//" + hostname + ":5001";
 
   var siriusHipHost = U.normalizeBaseUrl(U.readValue("in-SiriusHipHost"), defaultHost);
-  var url = new URL("/qido/studies", siriusHipHost);
+  var url = U.urlWithPath(siriusHipHost, "qido/studies");
 
   function setParam(key, value) {
     if (!value) return;
@@ -59,40 +96,14 @@ function buildUrl() {
 function updateOut() {
   var errors = validateInputs();
   var url = buildUrl();
-  var token = U.readValue("in-token");
 
-  var outUrl = document.getElementById("out-url");
+  var outUrl = document.getElementById("url");
   if (outUrl) outUrl.value = url;
 
-  var curlUrl = url;
-  if (token) {
-    try {
-      var u = new URL(url);
-      u.searchParams.delete("token");
-      curlUrl = u.toString();
-    } catch (_e) {
-      // keep original
-    }
-  }
+  setValidationAlert(errors);
 
-  var curl = "curl -G \"" + curlUrl + "\" -H \"content-type: application/json\"";
-  if (token) curl += " -H \"Authorization: Bearer " + token + "\"";
-  var outCurl = document.getElementById("out-curl");
-  if (outCurl) outCurl.textContent = curl;
-
-  var outErrors = document.getElementById("out-errors");
-  if (outErrors) {
-    if (errors.length) {
-      outErrors.classList.remove("d-none");
-      outErrors.textContent = errors.join(" ");
-    } else {
-      outErrors.classList.add("d-none");
-      outErrors.textContent = "";
-    }
-  }
-
-  var btnCopy = document.getElementById("btn-copy");
-  var btnOpen = document.getElementById("btn-open");
+  var btnCopy = document.getElementById("btn-copy-url");
+  var btnOpen = document.getElementById("btn-launch-url");
   var disabled = errors.length > 0;
   if (btnCopy) btnCopy.disabled = disabled;
   if (btnOpen) btnOpen.disabled = disabled;
@@ -119,21 +130,41 @@ document.addEventListener("DOMContentLoaded", function () {
   var siriusHipEl = document.getElementById("in-SiriusHipHost");
   if (siriusHipEl && !siriusHipEl.value) siriusHipEl.value = defaultHost;
 
-  var btnCopy = document.getElementById("btn-copy");
+  var btnCopy = document.getElementById("btn-copy-url");
   if (btnCopy) {
     btnCopy.addEventListener("click", async function () {
       updateOut();
-      await U.copyToClipboard(U.readValue("out-url"));
+      var ok = await U.copyToClipboard(U.readValue("url"));
+      if (ok) flashCopied(btnCopy);
     });
   }
 
-  var btnOpen = document.getElementById("btn-open");
+  var btnOpen = document.getElementById("btn-launch-url");
   if (btnOpen) {
     btnOpen.addEventListener("click", function () {
       updateOut();
-      U.openInNewTab(U.readValue("out-url"));
+      U.openInNewTab(U.readValue("url"));
     });
   }
 
   updateOut();
+
+  updateBuiltUrlBarPadding();
+
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(updateBuiltUrlBarPadding, 100);
+  });
+
+  if (window.ResizeObserver) {
+    var bar = document.querySelector("nav.navbar.fixed-bottom");
+    if (bar) {
+      try {
+        new ResizeObserver(updateBuiltUrlBarPadding).observe(bar);
+      } catch (_e) {
+        // ignore
+      }
+    }
+  }
 });

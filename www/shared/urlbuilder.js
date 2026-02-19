@@ -13,6 +13,13 @@
     return scheme + "//" + trimmed;
   };
 
+  U.urlWithPath = function urlWithPath(baseUrl, path) {
+    var base = new URL((baseUrl || "").toString());
+    if (!base.pathname.endsWith("/")) base.pathname += "/";
+    var rel = (path || "").toString().replace(/^\/+/, "");
+    return new URL(rel, base);
+  };
+
   U.readValue = function readValue(id) {
     var el = global.document.getElementById(id);
     if (!el) return "";
@@ -106,7 +113,7 @@
     var parts = U.splitBackslashList(raw);
     for (var i = 0; i < parts.length; i++) {
       if (!U.isValidUidToken(parts[i])) {
-        errors.push(label + " must be UID(s) containing digits and dots, separated by \"\\\\\" (backslash). ");
+        errors.push(label + " must be UID(s) containing digits and dots, separated by \"\\\" (backslash). ");
         break;
       }
     }

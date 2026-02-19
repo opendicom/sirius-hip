@@ -6,19 +6,20 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-02-10
+## [1.1.0] - 2026-02-16
 ### Added
 - New optimized QIDO-RS endpoint for studies: **`/qido/studies`**
   - Validates query parameters and formats responses as DICOM JSON.
   - Supports **`includefield`** with validation against an allowlist.
 - DICOM wildcard support in QIDO filters
   - Supports `*` (any sequence) and `?` (single char) via MySQL `LIKE ... ESCAPE`.
-- Dataset overrides for metadata in study queries
+- Metadata overrides for study query attributes
   - New **`metadata_overrides`** configuration in `sirius-hip.toml`.
   - Allows customizing patient/study attributes returned by queries.
+  - Entries use `keyword` and `source`.
 - One-time JWT tokens for **`/studyToken`** sessions
   - Enforces one-time token semantics (claim-once) and improves validation/errors.
-- Documentation for QIDO, StudyToken, and dataset overrides.
+- Documentation for QIDO and StudyToken.
 - Reference database schemas for dcm4chee 2.18.3 and 4.4.0.
 - Static URL builders served by nginx
   - StudyToken builder: `/urlbuilder/study-token.html`
