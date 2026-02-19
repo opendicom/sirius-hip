@@ -21,8 +21,8 @@ pub struct StudyTokenRow {
 
     /// DICOM (0008,0080) InstitutionName at study level.
     ///
-    /// If an override is configured with `keyword = "InstitutionName"` and `dataset = false`,
-    /// repositories select it as a direct column value (non-dataset) into this column.
+    /// If an override is configured with `keyword = "InstitutionName"`, repositories select it
+    /// as a direct column value into this column.
     pub institution_name: Option<String>,
 
     /// Study-level dataset blob used for default InstitutionName extraction.
@@ -45,12 +45,6 @@ pub struct StudyTokenRow {
     pub inst_no: Option<String>,
     pub sop_cuid: Option<String>,
     pub inst_attrs: Option<Vec<u8>>,
-
-    // Additional dataset blobs used by metadata_overrides (dataset=true)
-    pub ov_ds1: Option<Vec<u8>>,
-    pub ov_ds2: Option<Vec<u8>>,
-    pub ov_ds3: Option<Vec<u8>>,
-    pub ov_ds4: Option<Vec<u8>>,
 
     // File reference (relative + filesystem id)
     pub relative_file_path: Option<String>,

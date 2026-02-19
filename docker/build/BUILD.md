@@ -13,6 +13,5 @@ docker run --name sirius-hip-rocky8 opendicom/sirius-hip:latest-r8
 docker cp sirius-hip-rocky8:/root/.cargo/bin/sirius-hip dist/rocky8/
 docker stop sirius-hip-rocky8
 docker rm sirius-hip-rocky8
-docker image rm 
 docker image rm opendicom/sirius-hip:latest-r8
 ```

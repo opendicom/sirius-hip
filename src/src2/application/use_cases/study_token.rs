@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -6,12 +5,9 @@ use serde_json::json;
 use sqlx::MySqlPool;
 use async_trait::async_trait;
 use anyhow::Context;
-
-use std::sync::{Arc as StdArc, Mutex};
 use dicom_encoding::TransferSyntaxIndex;
 use dicom_object::InMemDicomObject;
 use dicom_transfer_syntax_registry::TransferSyntaxRegistry;
-use dicom_dictionary_std::tags as DicomTag;
 
 use crate::api::study_token::params::StudyTokenParams;
 use crate::auth::{self, AuthClaims};
@@ -126,7 +122,6 @@ trait StudyTokenPresenter {
 /// List of required metadata for OHIF viewer:
 /// https://docs.ohif.org/faq/technical#what-are-the-list-of-required-metadata-for-the-ohif-viewer-to-work
 struct OhifPresenter {
-    pool: MySqlPool,
     settings: Arc<Settings>,
 }
 struct CornerstonePresenter;
@@ -141,10 +136,6 @@ struct ZipPresenter;
 impl StudyTokenPresenter for OhifPresenter {
     async fn render(&self, plan: StudyTokenPlan) -> Result<StudyTokenOutput, AppError> {
         use crate::models::ohif::{Instance, InstanceMetadata, Serie, Studies, Study};
-        use dicom_core::Tag;
-        use dicom_core::DataElement;
-        use crate::settings::MetadataOverride;
-        use crate::src2::pacs::infrastructure::mysql_sql_helpers::dataset_sources;
 
         // Precompute URL constant pieces for this request.
         let wado_fallback = if plan.base_url.is_empty() {
@@ -191,20 +182,185 @@ impl StudyTokenPresenter for OhifPresenter {
             .get("1.2.840.10008.1.2.1")
             .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Missing Explicit Little Endian transfer syntax")))?;
 
-        let overrides: Option<&[MetadataOverride]> = self.settings.dicomarchive.metadata_overrides.as_deref();
-        // `dataset_sources()` returns the distinct set of `source` values where `dataset=true`.
-        // The list is sorted to make slot assignment deterministic across runs.
-        //
-        // IMPORTANT: the SQL repositories select these sources into a fixed number of columns
-        // in the row read-model: `ov_ds1..ov_ds4`.
-        // The mapping is positional:
-        // - ov_ds1 -> ds_sources[0]
-        // - ov_ds2 -> ds_sources[1]
-        // - ov_ds3 -> ds_sources[2]
-        // - ov_ds4 -> ds_sources[3]
-        //
-        // If you add a new dataset source, it must be within the supported limit (currently 4).
-        let ds_sources = dataset_sources(overrides);
+        // ------------------------------------------------------------------
+        // Fast DICOM tag extraction
+        // ------------------------------------------------------------------
+        // During /studyToken we intentionally do *no filesystem I/O*.
+        // If a tag is missing from `inst_attrs`, we return it as None/null.
+
+        #[derive(Default, Clone)]
+        struct PixelMeta {
+            columns: Option<u16>,
+            rows: Option<u16>,
+            photometric_interpretation: Option<String>,
+            bits_allocated: Option<u16>,
+            planar_configuration: Option<u16>,
+        }
+
+        fn read_u16_le(buf: &[u8], off: usize) -> Option<u16> {
+            let b0 = *buf.get(off)?;
+            let b1 = *buf.get(off + 1)?;
+            Some(u16::from_le_bytes([b0, b1]))
+        }
+
+        fn read_u32_le(buf: &[u8], off: usize) -> Option<u32> {
+            let b0 = *buf.get(off)?;
+            let b1 = *buf.get(off + 1)?;
+            let b2 = *buf.get(off + 2)?;
+            let b3 = *buf.get(off + 3)?;
+            Some(u32::from_le_bytes([b0, b1, b2, b3]))
+        }
+
+        fn trim_dicom_str(bytes: &[u8]) -> String {
+            let s = String::from_utf8_lossy(bytes);
+            s.trim_matches(|c: char| c == '\u{0}' || c.is_ascii_whitespace())
+                .to_string()
+        }
+
+        fn parse_first_u16_from_ascii(bytes: &[u8]) -> Option<u16> {
+            let s = String::from_utf8_lossy(bytes);
+            let first = s.split('\\').next()?.trim();
+            first.parse::<u16>().ok()
+        }
+
+        fn extract_pixel_meta_explicit_le(dataset: &[u8]) -> PixelMeta {
+            // Tags we care about:
+            // - Columns (0028,0011) US
+            // - Rows (0028,0010) US
+            // - PhotometricInterpretation (0028,0004) CS
+            // - BitsAllocated (0028,0100) US
+            // - PlanarConfiguration (0028,0006) US
+            let mut out = PixelMeta::default();
+
+            // VRs with 32-bit length and 2 reserved bytes.
+            fn is_long_vr(vr: &[u8; 2]) -> bool {
+                matches!(vr, b"OB" | b"OD" | b"OF" | b"OL" | b"OW" | b"SQ" | b"UC" | b"UR" | b"UT" | b"UN")
+            }
+
+            let mut i = 0usize;
+            while i + 8 <= dataset.len() {
+                let group = match read_u16_le(dataset, i) {
+                    Some(v) => v,
+                    None => break,
+                };
+                let element = match read_u16_le(dataset, i + 2) {
+                    Some(v) => v,
+                    None => break,
+                };
+
+                // Item / delimiter handling.
+                if group == 0xFFFE {
+                    let item_len = match read_u32_le(dataset, i + 4) {
+                        Some(v) => v,
+                        None => break,
+                    };
+                    i += 8;
+                    if item_len == 0xFFFF_FFFF {
+                        break;
+                    }
+                    i = i.saturating_add(item_len as usize);
+                    continue;
+                }
+
+                let vr = [dataset[i + 4], dataset[i + 5]];
+                let (header_len, value_len) = if is_long_vr(&vr) {
+                    if i + 12 > dataset.len() {
+                        break;
+                    }
+                    let vlen = match read_u32_le(dataset, i + 8) {
+                        Some(v) => v,
+                        None => break,
+                    };
+                    (12usize, vlen)
+                } else {
+                    if i + 8 > dataset.len() {
+                        break;
+                    }
+                    let vlen = match read_u16_le(dataset, i + 6) {
+                        Some(v) => v as u32,
+                        None => break,
+                    };
+                    (8usize, vlen)
+                };
+
+                if value_len == 0xFFFF_FFFF {
+                    break;
+                }
+
+                let value_start = i + header_len;
+                let value_end = value_start.saturating_add(value_len as usize);
+                if value_end > dataset.len() {
+                    break;
+                }
+                let value = &dataset[value_start..value_end];
+
+                match (group, element) {
+                    (0x0028, 0x0011) => {
+                        // Columns
+                        out.columns = out.columns.or_else(|| {
+                            if &vr == b"US" || &vr == b"SS" {
+                                read_u16_le(value, 0)
+                            } else {
+                                parse_first_u16_from_ascii(value)
+                            }
+                        });
+                    }
+                    (0x0028, 0x0010) => {
+                        // Rows
+                        out.rows = out.rows.or_else(|| {
+                            if &vr == b"US" || &vr == b"SS" {
+                                read_u16_le(value, 0)
+                            } else {
+                                parse_first_u16_from_ascii(value)
+                            }
+                        });
+                    }
+                    (0x0028, 0x0004) => {
+                        // PhotometricInterpretation
+                        if out.photometric_interpretation.is_none() {
+                            let s = trim_dicom_str(value);
+                            if !s.is_empty() {
+                                out.photometric_interpretation = Some(s);
+                            }
+                        }
+                    }
+                    (0x0028, 0x0100) => {
+                        // BitsAllocated
+                        out.bits_allocated = out.bits_allocated.or_else(|| {
+                            if &vr == b"US" || &vr == b"SS" {
+                                read_u16_le(value, 0)
+                            } else {
+                                parse_first_u16_from_ascii(value)
+                            }
+                        });
+                    }
+                    (0x0028, 0x0006) => {
+                        // PlanarConfiguration
+                        out.planar_configuration = out.planar_configuration.or_else(|| {
+                            if &vr == b"US" || &vr == b"SS" {
+                                read_u16_le(value, 0)
+                            } else {
+                                parse_first_u16_from_ascii(value)
+                            }
+                        });
+                    }
+                    _ => {}
+                }
+
+                if out.columns.is_some()
+                    && out.rows.is_some()
+                    && out.photometric_interpretation.is_some()
+                    && out.bits_allocated.is_some()
+                    && out.planar_configuration.is_some()
+                {
+                    break;
+                }
+
+                i = value_end;
+            }
+
+            out
+        }
 
         // Build by single pass over ordered rows: study -> series -> instances.
         let mut out: Vec<Study> = Vec::new();
@@ -240,9 +396,9 @@ impl StudyTokenPresenter for OhifPresenter {
                     .map(|age| age.to_string());
 
                 // Study-level InstitutionName (0008,0080):
-                // 1) If a direct column value (non-dataset) override is configured (dataset=false),
-                //    repositories select it into `row.institution_name`.
-                // 2) Otherwise, try to decode it from the study-level dataset blob `row.study_attrs`.
+                // 1) If an override is configured, repositories may select it into `row.institution_name`.
+                // 2) Otherwise, best-effort decode it from `row.study_attrs`, falling back to `row.inst_attrs`
+                //    (first instance).
                 let institution_name: Option<String> = row
                     .institution_name
                     .as_deref()
@@ -250,11 +406,19 @@ impl StudyTokenPresenter for OhifPresenter {
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string())
                     .or_else(|| {
-                        let bytes = row.study_attrs.as_deref()?;
                         // Best-effort decode: missing/invalid blobs should not break OHIF rendering.
+                        let bytes = row
+                            .study_attrs
+                            .as_deref()
+                            .or_else(|| row.inst_attrs.as_deref())?;
                         let dcm = InMemDicomObject::read_dataset_with_ts(bytes, ts).ok()?;
-                        let el = dcm.element_opt(Tag(0x0008, 0x0080)).ok()??;
-                        el.to_str().ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+                        let el = dcm
+                            .element_opt(dicom_core::Tag(0x0008, 0x0080))
+                            .ok()??;
+                        el.to_str()
+                            .ok()
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
                     });
 
                 current_study = Some(Study {
@@ -348,292 +512,27 @@ impl StudyTokenPresenter for OhifPresenter {
                 .map_err(|e| AppError::Internal(e.into()))?;
 
             let sop_cuid = row.sop_cuid.clone().unwrap_or_default();
-            
-            let inst_attrs = row
-                .inst_attrs
-                .as_deref()
-                .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Missing inst_attrs for OHIF")))?;
 
-            // Decode instance.inst_attrs used for Ohif-required metadata, applying overrides if needed.
-            let inst_attrs_dcm = InMemDicomObject::read_dataset_with_ts(inst_attrs, ts)
-                .context("Failed to read inst_attrs value from database")
-                .map_err(|e| AppError::Internal(e.into()))?;
+            // Pixel metadata tags are only meaningful for image storage SOP classes.
+            // Skipping extraction for non-image instances avoids unnecessary dataset decoding and file I/O.
+            let is_image_sop_class = crate::constants::SOP_CLASS_SINGLEFRAME
+                .contains(&sop_cuid.as_str())
+                || crate::constants::SOP_CLASS_MULTIFRAME.contains(&sop_cuid.as_str());
 
-            // Per-row override datasets (selected by SQL into ov_ds1..ov_ds4) follow ds_sources order.
-            // We build a map of `source` -> bytes for easy lookup when applying overrides below.
-            //
-            // Why a map?
-            // - `metadata_overrides` points to datasets using a string key (`source = "table.column"`).
-            // - The row model stores the actual bytes in positional fields (ov_ds1..ov_ds4).
-            // - This map bridges both worlds so later code can do: `bytes = map[source]`.
-            //
-            // Why references (`&str`, `&[u8]`) instead of owned values?
-            // - Avoid cloning `source` strings and dataset bytes on every row.
-            // - The references are valid for the duration of this loop iteration because:
-            //   - keys reference `ds_sources` items
-            //   - values reference `row.ov_dsN` buffers
-            let mut ds_bytes_by_source: HashMap<&str, &[u8]> = HashMap::new();
-            if let Some(src) = ds_sources.get(0) {
-                if let Some(b) = row.ov_ds1.as_deref() {
-                    ds_bytes_by_source.insert(src.as_str(), b);
-                }
-            }
-            if let Some(src) = ds_sources.get(1) {
-                if let Some(b) = row.ov_ds2.as_deref() {
-                    ds_bytes_by_source.insert(src.as_str(), b);
-                }
-            }
-            if let Some(src) = ds_sources.get(2) {
-                if let Some(b) = row.ov_ds3.as_deref() {
-                    ds_bytes_by_source.insert(src.as_str(), b);
-                }
-            }
-            if let Some(src) = ds_sources.get(3) {
-                if let Some(b) = row.ov_ds4.as_deref() {
-                    ds_bytes_by_source.insert(src.as_str(), b);
-                }
-            }
-
-            // Decode any override datasets needed for OHIF-required tags.
-            //
-            // We cache decoded datasets by `source` so if multiple keywords point to the same
-            // dataset blob we only parse it once per row.
-            let mut decoded_by_source: HashMap<String, InMemDicomObject> = HashMap::new();
-
-            // Helper to get the override source for a given DICOM keyword, if it exists and is a dataset override.
-            let dataset_source_for_keyword = |keyword: &str| -> Option<&str> {
-                let list = overrides?;
-                let ov = list.iter().find(|ov| ov.keyword == keyword)?;
-                if ov.dataset {
-                    Some(ov.source.as_str())
+            let (columns, rows_tag, photometric_interpretation, bits_allocated, planar_configuration) =
+                if is_image_sop_class {
+                    let inst_attrs = row.inst_attrs.as_deref().unwrap_or(&[]);
+                    let meta = extract_pixel_meta_explicit_le(inst_attrs);
+                    (
+                        meta.columns,
+                        meta.rows,
+                        meta.photometric_interpretation,
+                        meta.bits_allocated,
+                        meta.planar_configuration,
+                    )
                 } else {
-                    None
-                }
-            };
-
-            // Only decode datasets for the keywords OHIF needs in this code path.
-            // (We can extend this list later if other tags become override-driven.)
-            for keyword in [
-                "Columns",
-                "Rows",
-                "PhotometricInterpretation",
-                "BitsAllocated",
-                "PlanarConfiguration",
-            ] {
-                if let Some(source) = dataset_source_for_keyword(keyword) {
-                    if decoded_by_source.contains_key(source) {
-                        continue;
-                    }
-
-                    // If the configured override dataset is NULL for this row, we skip decoding.
-                    // Later, reads will fall back to `inst_attrs_dcm`.
-                    if let Some(bytes) = ds_bytes_by_source.get(source).copied() {
-                        let dcm = InMemDicomObject::read_dataset_with_ts(bytes, ts)
-                            .context(format!("Failed to read override dataset '{source}' for keyword '{keyword}'"))
-                            .map_err(|e| AppError::Internal(e.into()))?;
-                        decoded_by_source.insert(source.to_string(), dcm);
-                    }
-                }
-            }
-
-            // Helper to get the appropriate DICOM attributes for a given keyword, applying dataset override if configured.
-            //
-            // Decision logic:
-            // - If `metadata_overrides` says `keyword` is dataset-based, and we decoded that source,
-            //   use the override dataset.
-            // - Otherwise, fall back to the normal per-instance dataset (`inst_attrs`).
-            let dicomattrs_for_keyword = |keyword: &str| -> &InMemDicomObject {
-                if let Some(source) = dataset_source_for_keyword(keyword) {
-                    if let Some(dcm) = decoded_by_source.get(source) {
-                        return dcm;
-                    }
-                }
-                &inst_attrs_dcm
-            };
-
-            fn u16_from_element(
-                el: &DataElement<InMemDicomObject, Vec<u8>>,
-                tag: Tag,
-            ) -> Result<u16, AppError> {
-                el.to_int()
-                    .context(format!("Failed to parse DicomTag {tag} value to u16"))
-                    .map_err(|e| AppError::Internal(e.into()))
-            }
-
-            fn string_from_element(
-                el: &DataElement<InMemDicomObject, Vec<u8>>,
-                tag: Tag,
-            ) -> Result<String, AppError> {
-                el.to_str()
-                    .context(format!("Failed to parse DicomTag {tag} value to String"))
-                    .map_err(|e| AppError::Internal(e.into()))
-                    .map(|s| s.to_string())
-            }
-
-            // Fast-path: pull from inst_attrs (db_dicomattrs) without async fallback.
-            // If something is missing, we will fall back to reading from the DICOM file on disk.
-            // This avoids unnecessary file I/O in the common case.
-            let mut columns: Option<u16> = dicomattrs_for_keyword("Columns")
-                .element_opt(DicomTag::COLUMNS)
-                .map_err(|e| AppError::Internal(e.into()))?
-                .map(|el| u16_from_element(el, DicomTag::COLUMNS))
-                .transpose()?;
-
-            let mut rows_tag: Option<u16> = dicomattrs_for_keyword("Rows")
-                .element_opt(DicomTag::ROWS)
-                .map_err(|e| AppError::Internal(e.into()))?
-                .map(|el| u16_from_element(el, DicomTag::ROWS))
-                .transpose()?;
-
-            let mut photometric_interpretation: Option<String> = dicomattrs_for_keyword("PhotometricInterpretation")
-                .element_opt(DicomTag::PHOTOMETRIC_INTERPRETATION)
-                .map_err(|e| AppError::Internal(e.into()))?
-                .map(|el| string_from_element(el, DicomTag::PHOTOMETRIC_INTERPRETATION))
-                .transpose()?;
-
-            let mut bits_allocated: Option<u16> = dicomattrs_for_keyword("BitsAllocated")
-                .element_opt(DicomTag::BITS_ALLOCATED)
-                .map_err(|e| AppError::Internal(e.into()))?
-                .map(|el| u16_from_element(el, DicomTag::BITS_ALLOCATED))
-                .transpose()?;
-
-            let mut planar_configuration: Option<u16> = if let Some(pi) = photometric_interpretation.as_deref() {
-                if pi != "MONOCHROME1" && pi != "MONOCHROME2" {
-                    dicomattrs_for_keyword("PlanarConfiguration")
-                        .element_opt(DicomTag::PLANAR_CONFIGURATION)
-                        .map_err(|e| AppError::Internal(e.into()))?
-                        .map(|el| u16_from_element(el, DicomTag::PLANAR_CONFIGURATION))
-                        .transpose()?
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Slow-path: if something critical is missing from inst_attrs, fall back to the a helper
-            // which can read from the DICOM file on disk.
-            if columns.is_none()
-                || rows_tag.is_none()
-                || photometric_interpretation.is_none()
-                || bits_allocated.is_none()
-                || (planar_configuration.is_none()
-                    && photometric_interpretation
-                        .as_deref()
-                        .map(|pi| pi != "MONOCHROME1" && pi != "MONOCHROME2")
-                        .unwrap_or(false))
-            {
-                // Get absolute filepath.
-                let abs_filepath = match (row.filesystem_fk, row.relative_file_path.as_deref()) {
-                    (Some(fs_id), Some(rel)) => self
-                        .settings
-                        .dicomarchive
-                        .get_fs_path_by_id(fs_id)
-                        .map(|base| {
-                            format!(
-                                "{}/{}",
-                                base.trim_end_matches('/'),
-                                rel.trim_start_matches('/')
-                            )
-                        })
-                        .unwrap_or_default(),
-                    _ => String::new(),
+                    (None, None, None, None, None)
                 };
-
-                // Prepare for file reading.
-                let filepath: StdArc<Mutex<String>> = StdArc::new(Mutex::new(abs_filepath));
-                let mut file_dicomattrs = InMemDicomObject::new_empty();
-
-                if columns.is_none() {
-                    let tag = DicomTag::COLUMNS;
-                    columns = crate::database::helpers::get_dicom_element(
-                        tag,
-                        filepath.clone(),
-                        dicomattrs_for_keyword("Columns"),
-                        &mut file_dicomattrs,
-                        instance_pk,
-                        &self.pool,
-                        &self.settings,
-                    )
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?
-                    .map(|el| u16_from_element(el, tag))
-                    .transpose()?;
-                }
-
-                if rows_tag.is_none() {
-                    let tag = DicomTag::ROWS;
-                    rows_tag = crate::database::helpers::get_dicom_element(
-                        tag,
-                        filepath.clone(),
-                        dicomattrs_for_keyword("Rows"),
-                        &mut file_dicomattrs,
-                        instance_pk,
-                        &self.pool,
-                        &self.settings,
-                    )
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?
-                    .map(|el| u16_from_element(el, tag))
-                    .transpose()?;
-                }
-
-                if photometric_interpretation.is_none() {
-                    let tag = DicomTag::PHOTOMETRIC_INTERPRETATION;
-                    photometric_interpretation = crate::database::helpers::get_dicom_element(
-                        tag,
-                        filepath.clone(),
-                        dicomattrs_for_keyword("PhotometricInterpretation"),
-                        &mut file_dicomattrs,
-                        instance_pk,
-                        &self.pool,
-                        &self.settings,
-                    )
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?
-                    .map(|el| string_from_element(el, tag))
-                    .transpose()?;
-                }
-
-                if bits_allocated.is_none() {
-                    let tag = DicomTag::BITS_ALLOCATED;
-                    bits_allocated = crate::database::helpers::get_dicom_element(
-                        tag,
-                        filepath.clone(),
-                        dicomattrs_for_keyword("BitsAllocated"),
-                        &mut file_dicomattrs,
-                        instance_pk,
-                        &self.pool,
-                        &self.settings,
-                    )
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?
-                    .map(|el| u16_from_element(el, tag))
-                    .transpose()?;
-                }
-
-                let needs_planar = photometric_interpretation
-                    .as_deref()
-                    .map(|pi| pi != "MONOCHROME1" && pi != "MONOCHROME2")
-                    .unwrap_or(false);
-
-                if needs_planar && planar_configuration.is_none() {
-                    let tag = DicomTag::PLANAR_CONFIGURATION;
-                    planar_configuration = crate::database::helpers::get_dicom_element(
-                        tag,
-                        filepath.clone(),
-                        dicomattrs_for_keyword("PlanarConfiguration"),
-                        &mut file_dicomattrs,
-                        instance_pk,
-                        &self.pool,
-                        &self.settings,
-                    )
-                    .await
-                    .map_err(|e| AppError::Internal(e.into()))?
-                    .map(|el| u16_from_element(el, tag))
-                    .transpose()?;
-                }
-            }
 
             let series_date = row
                 .series_updated_time
@@ -840,12 +739,11 @@ fn build_absolute_filesystem_path(settings: &Settings, row: &crate::src2::pacs::
 pub async fn execute_study_token(
     study_repo: Arc<dyn StudyRepository>,
     session_repo: Arc<dyn DownloadSessionRepository>,
-    pacs_pool: MySqlPool,
+    _pacs_pool: MySqlPool,
     settings: Arc<Settings>,
     params: StudyTokenParams,
     server_base_url: &str,
 ) -> Result<StudyTokenOutput, AppError> {
-
 
         let access_type = AccessType::from_param(params.access_type.as_str())
             .ok_or_else(|| AppError::bad_request("missing required parameter"))?;
@@ -872,10 +770,9 @@ pub async fn execute_study_token(
                 .token
                 .as_deref()
                 .ok_or_else(|| AppError::unauthorized("missing token"))?;
-            let claims = jwt_claims
-                .as_ref()
-                .ok_or_else(|| AppError::unauthorized("invalid token"))?;
-            session_repo.claim_one_time_token(token, claims.exp).await?;
+            if session_repo.is_one_time_token_used(token).await? {
+                return Err(AppError::TokenAlreadyUsed);
+            }
         }
 
         // --------------------------------------------------------------
@@ -910,33 +807,33 @@ pub async fn execute_study_token(
             sop_class_off: params.sop_class_off.as_deref(),
         };
 
-
         // ------------------------------------------------------------
         // 3. LOAD STUDY FROM PACS
         // ------------------------------------------------------------
-
         let include_ohif_metadata = matches!(access_type, AccessType::Ohif);
+
+        // Only request filesystem references when we can actually use them.
+        // - OneTime: we may persist filesystem refs per file.
+        // - ZIP: we may prefer file:// sources when available.
+        // - OHIF: presenter does no disk I/O during /studyToken, so filesystem refs aren't needed.
+        let filesystem_configured = !settings.dicomarchive.filesystems.is_empty();
+        let include_filesystem = filesystem_configured
+            && (matches!(settings.jwt_auth, JwtAuthMethod::OneTime)
+            || matches!(access_type, AccessType::Zip));
 
         let rows = study_repo
             .fetch_study_token_rows(
                 query,
-                // Always fetch filesystem references (relative path + filesystem_fk).
-                // Whether a given instance should be served from disk vs via WADO is decided
-                // per-row using PACS timestamps (`use_filesystem`), not by `accessType`.
-                // These paths are also required to build OneTime sessions and ZIP sources
-                // (file:// vs WADO) even when the response itself is not OHIF.
-                true,
-                // Reuse the 3rd flag to request extra OHIF metadata (patient/study/series/instance + inst_attrs).
+                include_filesystem,
+                // Request extra OHIF metadata (patient/study/series/instance + inst_attrs).
                 include_ohif_metadata,
             )
             .await
             .map_err(AppError::Pacs)?;
-       
 
         // ------------------------------------------------------------
         // 4. CREATE DOWNLOAD SESSION (ONLY IF OneTime)
         // ------------------------------------------------------------
-
         let mut session_id: Option<String> = None;
         let mut session_expires_at: Option<DateTime<Utc>> = None;
         let mut persisted_files_for_zip: Option<Vec<DownloadSessionFile>> = None;
@@ -967,8 +864,14 @@ pub async fn execute_study_token(
                 })
                 .collect::<Vec<_>>();
 
-            session_repo.create_session(&session).await?;
-            session_repo.add_files(&files).await?;
+            let token = params
+                .token
+                .as_deref()
+                .ok_or_else(|| AppError::unauthorized("missing token"))?;
+
+            session_repo
+                .create_session_with_files_and_claim_token(&session, &files, token, claims.exp)
+                .await?;
 
             session_id = Some(new_session_id);
             session_expires_at = Some(expires_at);
@@ -978,7 +881,6 @@ pub async fn execute_study_token(
                 persisted_files_for_zip = Some(files);
             }
         }
-
 
         // ------------------------------------------------------------
         // 5. BUILD PLAN (domain) and RENDER (presentation)
@@ -1143,7 +1045,6 @@ pub async fn execute_study_token(
             AccessType::Weasis => WeasisPresenter.render(plan).await?,
             AccessType::Ohif => {
                 let presenter = OhifPresenter {
-                    pool: pacs_pool.clone(),
                     settings: settings.clone(),
                 };
                 presenter.render(plan).await?

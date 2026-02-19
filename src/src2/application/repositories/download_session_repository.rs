@@ -11,6 +11,19 @@ pub trait DownloadSessionRepository: Send + Sync {
     
     async fn add_files(&self, files: &[DownloadSessionFile]) -> Result<(), AppError>;
 
+    /// Creates a session and inserts its files as a single optimized operation.
+    ///
+    /// Backends may override this to use a transaction and reduce commit overhead.
+    /// Default implementation falls back to calling `create_session()` + `add_files()`.
+    async fn create_session_with_files(
+        &self,
+        session: &DownloadSession,
+        files: &[DownloadSessionFile],
+    ) -> Result<(), AppError> {
+        self.create_session(session).await?;
+        self.add_files(files).await
+    }
+
     async fn get_file(&self, session_id: &str, file_index: u32) -> Result<DownloadSessionFile, AppError>;
 
     /// Marks all files in the session as "downloaded".
@@ -34,6 +47,29 @@ pub trait DownloadSessionRepository: Send + Sync {
     /// ship without enforcing OneTime semantics.
     async fn claim_one_time_token(&self, _token: &str, _exp: usize) -> Result<(), AppError> {
         Err(AppError::OneTimeTokenStoreUnsupported)
+    }
+
+    /// Checks whether a one-time /studyToken JWT was already consumed.
+    ///
+    /// This should be a fast read (no commit) so callers can reject replays
+    /// without paying write/fsync latency.
+    async fn is_one_time_token_used(&self, _token: &str) -> Result<bool, AppError> {
+        Err(AppError::OneTimeTokenStoreUnsupported)
+    }
+
+    /// Creates a session, inserts its files, and claims the one-time token in a single transaction.
+    ///
+    /// Implementations should insert the token first (so duplicates fail fast) and commit once.
+    /// Default implementation falls back to claiming the token and then creating the session.
+    async fn create_session_with_files_and_claim_token(
+        &self,
+        session: &DownloadSession,
+        files: &[DownloadSessionFile],
+        token: &str,
+        exp: usize,
+    ) -> Result<(), AppError> {
+        self.claim_one_time_token(token, exp).await?;
+        self.create_session_with_files(session, files).await
     }
 
     /// Best-effort cleanup of expired OneTime data in the application DB.

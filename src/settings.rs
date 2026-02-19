@@ -9,7 +9,6 @@ use crate::utils::{url_password_hidden, password_hidden};
 pub struct MetadataOverride {
     pub keyword: String,
     pub source: String,
-    pub dataset: bool,
 }
 
 /// JWT Authentication methods supported by Sirius HIP
@@ -159,7 +158,6 @@ impl DicomArchive {
         }
 
         let mut seen = HashSet::new();
-        let mut dataset_sources = HashSet::new();
 
         for ov in list {
             if !is_simple_keyword(&ov.keyword) {
@@ -171,71 +169,6 @@ impl DicomArchive {
             if parse_qualified_ident(&ov.source).is_none() {
                 anyhow::bail!("Invalid metadata_overrides.source (expected table.column): {}", ov.source);
             }
-
-            if ov.dataset {
-                // Fail-fast: dataset sources must be readable from the StudyToken SQL query.
-                // We currently only support dataset columns coming from tables already joined
-                // by the StudyToken query for the selected PACS schema version.
-                let (table, _col) = parse_qualified_ident(&ov.source)
-                    .expect("validated above");
-
-                let table_ok = match self.version {
-                    DBVersion::dcm4chee2183 => matches!(
-                        table,
-                        "study" | "patient" | "series" | "instance" | "files"
-                    ),
-                    DBVersion::dcm4chee440 => matches!(
-                        table,
-                        "study" | "patient" | "person_name" | "series" | "instance" | "file_ref" | "dicomattrs"
-                    ),
-                };
-
-                if !table_ok {
-                    anyhow::bail!(
-                        "metadata_overrides: dataset=true source '{}' references table '{}' which is not joined by the StudyToken query for version {:?}",
-                        ov.source,
-                        table,
-                        self.version
-                    );
-                }
-
-                dataset_sources.insert(ov.source.as_str());
-            }
-
-            // Fail-fast rule: dataset overrides cannot be used for filtering.
-            // These keywords appear in request filters (SQL WHERE) for studyToken/QIDO.
-            if ov.dataset {
-                let k = ov.keyword.as_str();
-                let is_filterable = matches!(
-                    k,
-                    "PatientID"
-                        | "PatientName"
-                        | "ReferringPhysicianName"
-                        | "AccessionNumber"
-                        | "ModalitiesInStudy"
-                        | "StudyInstanceUID"
-                        | "StudyID"
-                        | "StudyDate"
-                        | "StudyTime"
-                        | "SeriesInstanceUID"
-                        | "SOPInstanceUID"
-                );
-                if is_filterable {
-                    anyhow::bail!(
-                        "metadata_overrides: keyword '{}' cannot be dataset=true because it is used in SQL filters",
-                        k
-                    );
-                }
-            }
-        }
-
-        // Current read-model supports selecting up to 4 distinct dataset blobs.
-        // (This can be lifted later by switching to a dynamic row model.)
-        if dataset_sources.len() > 4 {
-            anyhow::bail!(
-                "metadata_overrides: too many distinct dataset sources ({} > 4)",
-                dataset_sources.len()
-            );
         }
 
         Ok(())

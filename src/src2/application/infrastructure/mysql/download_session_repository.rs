@@ -132,6 +132,166 @@ impl MySqlDownloadSessionRepository {
 
 #[async_trait]
 impl DownloadSessionRepository for MySqlDownloadSessionRepository {
+
+    async fn is_one_time_token_used(&self, token: &str) -> Result<bool, AppError> {
+
+        let mut conn = self.pool.acquire().await?;
+
+        let token_hash: Vec<u8> = Sha256::digest(token.as_bytes()).to_vec();
+        let found: Option<i32> = sqlx::query_scalar(
+            r#"
+            SELECT 1
+            FROM HIP_one_time_tokens
+            WHERE token_hash = ?
+            LIMIT 1
+            "#,
+        )
+        .bind(token_hash)
+        .fetch_optional(&mut *conn)
+        .await?;
+
+        Ok(found.is_some())
+    }
+
+    async fn create_session_with_files_and_claim_token(
+        &self,
+        session: &DownloadSession,
+        files: &[DownloadSessionFile],
+        token: &str,
+        exp: usize,
+    ) -> Result<(), AppError> {
+        let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(exp as i64, 0)
+            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Invalid expiration timestamp")))?;
+
+        let token_hash: Vec<u8> = Sha256::digest(token.as_bytes()).to_vec();
+
+        let mut tx = self.pool.begin().await?;
+
+        // 1) Claim token first so duplicates fail fast.
+        let insert_res = sqlx::query(
+            r#"
+            INSERT INTO HIP_one_time_tokens (token_hash, expires_at, consumed_at)
+            VALUES (?, ?, UTC_TIMESTAMP())
+            "#,
+        )
+        .bind(token_hash)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await;
+
+        match insert_res {
+            Ok(_) => {}
+            Err(e) => {
+                // ER_DUP_ENTRY = #(1062) 23000
+                // Duplicate entry means the token was already consumed.
+                let duplicate = match &e {
+                    sqlx::Error::Database(db) => db.code().as_deref() == Some("23000"),
+                    _ => false,
+                };
+                if duplicate {
+                    return Err(AppError::TokenAlreadyUsed);
+                }
+                return Err(AppError::Database(e));
+            }
+        }
+
+        // 2) Persist session + files.
+        sqlx::query(
+            r#"
+            INSERT INTO HIP_download_sessions (
+                session_id,
+                expires_at,
+                total_files,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(&session.session_id)
+        .bind(session.expires_at)
+        .bind(session.total_files as i64)
+        .bind(session.created_at)
+        .execute(&mut *tx)
+        .await?;
+
+        if !files.is_empty() {
+            const CHUNK_SIZE: usize = 500;
+            for chunk in files.chunks(CHUNK_SIZE) {
+                let mut query_builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO HIP_download_session_files (session_id, file_index, instance_uid, study_uid, series_uid, use_wado, filesystem_fk, relative_file_path) ",
+                );
+
+                query_builder.push_values(chunk.iter(), |mut b, f| {
+                    b.push_bind(&f.session_id)
+                        .push_bind(f.file_index as i64)
+                        .push_bind(&f.instance_uid)
+                        .push_bind(&f.study_uid)
+                        .push_bind(&f.series_uid)
+                        .push_bind(f.use_wado)
+                        .push_bind(f.filesystem_fk)
+                        .push_bind(&f.relative_file_path);
+                });
+
+                query_builder.build().execute(&mut *tx).await?;
+            }
+        }
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    async fn create_session_with_files(
+        &self,
+        session: &DownloadSession,
+        files: &[DownloadSessionFile],
+    ) -> Result<(), AppError> {
+
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO HIP_download_sessions (
+                session_id,
+                expires_at,
+                total_files,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(&session.session_id)
+        .bind(session.expires_at)
+        .bind(session.total_files as i64)
+        .bind(session.created_at)
+        .execute(&mut *tx)
+        .await?;
+
+        if !files.is_empty() {
+            const CHUNK_SIZE: usize = 500;
+            for chunk in files.chunks(CHUNK_SIZE) {
+                let mut query_builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO HIP_download_session_files (session_id, file_index, instance_uid, study_uid, series_uid, use_wado, filesystem_fk, relative_file_path) ",
+                );
+
+                query_builder.push_values(chunk.iter(), |mut b, f| {
+                    b.push_bind(&f.session_id)
+                        .push_bind(f.file_index as i64)
+                        .push_bind(&f.instance_uid)
+                        .push_bind(&f.study_uid)
+                        .push_bind(&f.series_uid)
+                        .push_bind(f.use_wado)
+                        .push_bind(f.filesystem_fk)
+                        .push_bind(&f.relative_file_path);
+                });
+
+                query_builder.build().execute(&mut *tx).await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
     
     async fn create_session(&self, session: &DownloadSession) -> Result<(), AppError> {
 

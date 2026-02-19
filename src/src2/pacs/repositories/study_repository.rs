@@ -20,15 +20,17 @@ pub trait StudyRepository: Send + Sync {
     /// The query can include various filters at patient, study, series, and instance levels.
     /// Returns a vector of matching StudyTokenRow records.
     /// If no records match, returns an empty vector.
-    /// The include_filesystem and include_wado flags
-    /// control whether filesystem paths and WADO URLs
-    /// are included in the returned rows.
-    /// `include_wado` is reused to request extra OHIF metadata.
+    /// `include_filesystem` controls whether per-instance filesystem references
+    /// (relative path + filesystem id) are selected.
+    ///
+    /// `include_ohif_metadata` controls whether the additional patient/study/series/instance
+    /// metadata (including instance datasets like `inst_attrs`) required by the OHIF presenter
+    /// is selected.
     async fn fetch_study_token_rows(
         &self,
         query: StudyTokenQuery<'_>,
         include_filesystem: bool,
-        include_wado: bool,
+        include_ohif_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError>;
 
     /// Executes a study-level query suitable for QIDO-RS `/studies`.
@@ -55,7 +57,6 @@ pub struct StudyTokenQuery<'a> {
     /// Each override describes:
     /// - what: `keyword`
     /// - where: `source` (must be `table.column`)
-    /// - how: `dataset` (when true, `source` points to a DICOM dataset blob)
     ///
     /// NOTE: identifier validation is performed at startup (settings validation)
     /// and repository implementations may additionally enforce repository-specific rules.
@@ -144,7 +145,6 @@ pub struct QidoStudiesQuery<'a> {
     /// Each override describes:
     /// - what: `keyword`
     /// - where: `source` (must be `table.column`)
-    /// - how: `dataset` (when true, `source` points to a DICOM dataset blob)
     ///
     pub metadata_overrides: Option<&'a [MetadataOverride]>,
     pub patient_id: Option<&'a str>,

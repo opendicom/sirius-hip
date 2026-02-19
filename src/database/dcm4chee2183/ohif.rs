@@ -26,7 +26,7 @@ pub async fn get_studies(pool: &MySqlPool, params: &StudyTokenParams, settings: 
     let mut query_builder = QueryBuilder::new();
 
     // Study-level InstitutionName (0008,0080) override:
-    // if configured (dataset=false), select it as a direct column value (non-dataset), e.g. `study.study_custom1`.
+    // If configured, select it as a direct column value, e.g. `study.study_custom1`.
     let institution_name_expr = override_col(
         settings.dicomarchive.metadata_overrides.as_deref(),
         "InstitutionName",

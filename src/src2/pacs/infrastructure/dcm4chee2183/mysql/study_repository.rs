@@ -4,7 +4,7 @@ use sqlx::{MySql, MySqlPool, QueryBuilder};
 use crate::src2::errors::PacsError;
 use crate::src2::pacs::read_models::QidoStudyRow;
 use crate::src2::pacs::read_models::StudyTokenRow;
-use crate::src2::pacs::infrastructure::mysql_sql_helpers::{dataset_sources, override_col, override_or_default, qualified_ident_expr};
+use crate::src2::pacs::infrastructure::mysql_sql_helpers::{override_col, override_or_default};
 use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::repositories::study_repository::{
     QidoStudiesIncludeFields, QidoStudiesQuery, StudyTokenQuery,
@@ -27,21 +27,40 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         &self,
         query: StudyTokenQuery<'_>,
         include_filesystem: bool,
-        include_wado: bool,
+        include_ohif_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError> {
+        
         fn split_backslash(value: &str) -> Vec<&str> {
             value.split('\\').filter(|s| !s.is_empty()).collect()
         }
 
-        let use_filesystem_expr = "(
-            ABS(TIMESTAMPDIFF(SECOND, study.created_time, study.updated_time)) <= 600 AND 
-            ABS(TIMESTAMPDIFF(SECOND, series.created_time, series.updated_time)) <= 600 AND 
-            ABS(TIMESTAMPDIFF(SECOND, instance.created_time, instance.updated_time)) <= 600
-        )";
+        let use_filesystem_expr = if include_filesystem {
+            "(
+                ABS(TIMESTAMPDIFF(SECOND, study.created_time, study.updated_time)) <= 600 AND 
+                ABS(TIMESTAMPDIFF(SECOND, series.created_time, series.updated_time)) <= 600 AND 
+                ABS(TIMESTAMPDIFF(SECOND, instance.created_time, instance.updated_time)) <= 600 AND
+                files_pick.filepath IS NOT NULL AND
+                files_pick.filesystem_fk IS NOT NULL
+            )"
+        } else {
+            "(0)"
+        };
 
         let mut qb = QueryBuilder::<MySql>::new("SELECT ");
 
         let overrides = query.metadata_overrides;
+        let patient_id_override = override_col(overrides, "PatientID");
+        let patient_name_override = override_col(overrides, "PatientName");
+        let needs_patient_name_filter = query.patient_fullname.is_some();
+        let needs_patient_id_filter_on_override = if query.patient_id.is_some() {
+            matches!(patient_id_override.as_deref(), Some(c) if c.starts_with("patient."))
+        } else {
+            false
+        };
+        let needs_patient_join = include_ohif_metadata
+            || needs_patient_name_filter
+            || needs_patient_id_filter_on_override
+            || matches!(patient_name_override.as_deref(), Some(c) if c.starts_with("patient."));
         let patient_name_expr = override_or_default(overrides, "PatientName", "patient.pat_name");
         let patient_id_expr = override_or_default(overrides, "PatientID", "patient.pat_id");
         let patient_sex_expr = override_or_default(overrides, "PatientSex", "patient.pat_sex");
@@ -52,27 +71,10 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         let study_description_expr = override_or_default(overrides, "StudyDescription", "study.study_desc");
         // InstitutionName (0008,0080) is special:
         // - Default comes from decoding `study.study_attrs`.
-        // - Optionally it can be overridden as a direct column value (non-dataset), e.g. from `study.study_custom1`.
+        // - Optionally it can be overridden as a direct column value, e.g. from `study.study_custom1`.
         let institution_name_expr = override_col(overrides, "InstitutionName").unwrap_or_else(|| "NULL".to_string());
 
-        let ds_sources = dataset_sources(overrides);
-
-        // Dataset overrides (`dataset=true`) work by selecting up to 4 extra dataset blobs
-        // into the read-model columns `ov_ds1..ov_ds4`.
-        //
-        // The helper `dataset_sources(overrides)` returns the distinct set of override sources
-        // (the `source = "table.column"` strings) and sorts them for deterministic ordering.
-        // We rely on that stable ordering to assign each source to a fixed slot:
-        // - ov_ds1 -> ds_sources[0]
-        // - ov_ds2 -> ds_sources[1]
-        // - ov_ds3 -> ds_sources[2]
-        // - ov_ds4 -> ds_sources[3]
-        //
-        // The OHIF presenter later rebuilds the same `ds_sources` list and uses it to map
-        // `source` -> `ov_dsN` bytes for per-row decoding.
-
-
-        if include_wado {
+        if include_ohif_metadata {
             qb.push(
                 format!(
                     "{} AS patient_name, 
@@ -96,7 +98,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                      study.num_instances AS num_instances, 
                      {} AS modalities,
                      {} AS institution_name,
-                     study.study_attrs AS study_attrs,
+                     NULL AS study_attrs,
                     ",
                     study_description_expr,
                     accession_no_expr,
@@ -128,7 +130,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                instance.sop_iuid AS sop_instance_uid, ",
         );
 
-        if include_wado {
+        if include_ohif_metadata {
             qb.push(
                 "CAST(series.series_no AS CHAR) AS series_no,
                  series.series_desc AS series_description,
@@ -139,17 +141,6 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                  instance.sop_cuid AS sop_cuid,
                  instance.inst_attrs AS inst_attrs,",
             );
-
-            // Push dataset sources for metadata_overrides with dataset=true, if any.
-            // We support up to 4 such overrides; if more are defined, the extras will be ignored with a warning.
-            // The dataset blobs will be available in the StudyTokenRow as ov_ds1, ov_ds2, etc.
-            for (idx, slot) in (1usize..=4).enumerate() {
-                let expr = ds_sources
-                    .get(idx)
-                    .and_then(|s| qualified_ident_expr(s))
-                    .unwrap_or_else(|| "NULL".to_string());
-                qb.push(format!("{} AS ov_ds{},", expr, slot));
-            }
         } else {
             qb.push(
                 "NULL AS series_no,
@@ -159,22 +150,18 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                  NULL AS instance_pk,
                  NULL AS inst_no,
                  NULL AS sop_cuid,
-                 NULL AS inst_attrs,
-                 NULL AS ov_ds1,
-                 NULL AS ov_ds2,
-                 NULL AS ov_ds3,
-                 NULL AS ov_ds4,",
+                 NULL AS inst_attrs,",
             );
         }
 
         if include_filesystem {
             qb.push("IF(");
             qb.push(use_filesystem_expr);
-            qb.push(", files.filepath, NULL) AS relative_file_path,");
+            qb.push(", files_pick.filepath, NULL) AS relative_file_path,");
 
             qb.push("IF(");
             qb.push(use_filesystem_expr);
-            qb.push(", files.filesystem_fk, NULL) AS filesystem_fk,");
+            qb.push(", CAST(files_pick.filesystem_fk AS SIGNED), NULL) AS filesystem_fk,");
         } else {
             qb.push("NULL AS relative_file_path, NULL AS filesystem_fk,");
         }
@@ -185,12 +172,29 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
 
         qb.push(
             "FROM `study`
-             INNER JOIN `patient` ON patient.pk = study.patient_fk
              INNER JOIN `series` ON series.study_fk = study.pk
-             INNER JOIN `instance` ON instance.series_fk = series.pk
-             INNER JOIN `files` ON files.instance_fk = instance.pk
-             WHERE 1=1",
+             INNER JOIN `instance` ON instance.series_fk = series.pk",
         );
+
+        if needs_patient_join {
+            qb.push(" INNER JOIN `patient` ON patient.pk = study.patient_fk");
+        }
+
+        // `files` can have multiple rows per instance; pick one to avoid multiplying result rows.
+        // Avoid a derived GROUP BY which can scan the full `files` table.
+        if include_filesystem {
+            qb.push(
+                " LEFT JOIN files files_pick
+                    ON files_pick.instance_fk = instance.pk
+                   AND files_pick.pk = (
+                        SELECT MAX(f2.pk)
+                        FROM files f2
+                        WHERE f2.instance_fk = instance.pk
+                   )",
+            );
+        }
+
+        qb.push(" WHERE 1=1");
 
         // NOTE: `WHERE 1=1` is intentional.
         // It makes it safe to append any number of dynamic filters as `AND ...`
@@ -207,11 +211,21 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
 
         // Patient filters
         if let Some(patient_id) = query.patient_id {
-            let patient_id_where = override_or_default(overrides, "PatientID", "patient.pat_id");
-            qb.push(" AND ")
-                .push(patient_id_where)
-                .push(" = ")
-                .push_bind(patient_id);
+            if needs_patient_join {
+                let patient_id_where = override_or_default(overrides, "PatientID", "patient.pat_id");
+                qb.push(" AND ")
+                    .push(patient_id_where)
+                    .push(" = ")
+                    .push_bind(patient_id);
+            } else if let Some(col) = patient_id_override {
+                // If an override exists but we didn't join patient, apply it directly.
+                // (Typical overrides reference `study.*` or `patient.*`; patient.* forces join via `needs_patient_join`.)
+                qb.push(" AND ").push(col).push(" = ").push_bind(patient_id);
+            } else {
+                // Avoid joining `patient` just to filter by patient_id.
+                qb.push(" AND study.patient_fk IN (SELECT p.pk FROM patient p WHERE p.pat_id = ");
+                qb.push_bind(patient_id).push(")");
+            }
         }
         if let Some(patient_regex) = query.patient_fullname {
             // NOTE: columns are VARCHAR(..) BINARY, so matching is case-sensitive.
@@ -226,12 +240,17 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         if let Some(study_uids) = query.study_instance_uid {
             let values = split_backslash(study_uids);
             if !values.is_empty() {
-                qb.push(" AND study.study_iuid IN (");
-                let mut separated = qb.separated(", ");
-                for v in values {
-                    separated.push_bind(v);
+                if values.len() == 1 {
+                    qb.push(" AND study.study_iuid = ")
+                        .push_bind(values[0]);
+                } else {
+                    qb.push(" AND study.study_iuid IN (");
+                    let mut separated = qb.separated(", ");
+                    for v in values {
+                        separated.push_bind(v);
+                    }
+                    separated.push_unseparated(")");
                 }
-                separated.push_unseparated(")");
             }
         }
 
@@ -245,28 +264,37 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             qb.push(" AND study.study_id LIKE ").push_bind(format!("%{}%", study_id));
         }
 
-        // Study date filter on DATE(study_datetime)
+        // Study date filter for dcm4chee 2.18.3
+        // `study.study_datetime` is a DATETIME, so avoid wrapping it in DATE(...)
+        // to keep predicates sargable (i.e. allow index usage).
         if let Some(study_date) = query.study_date {
             let parts = study_date.split('|').collect::<Vec<_>>();
             match parts.as_slice() {
                 // "YYYY-MM-DD" (no pipe present)
                 [single] if !study_date.contains('|') => {
-                    qb.push(" AND DATE(study.study_datetime) = ").push_bind(*single);
+                    qb.push(" AND study.study_datetime >= ")
+                        .push_bind(*single)
+                        .push(" AND study.study_datetime < DATE_ADD(")
+                        .push_bind(*single)
+                        .push(", INTERVAL 1 DAY)");
                 }
                 // "YYYY-MM-DD|" (>=)
                 [start, ""] => {
-                    qb.push(" AND DATE(study.study_datetime) >= ").push_bind(*start);
+                    qb.push(" AND study.study_datetime >= ").push_bind(*start);
                 }
                 // "|YYYY-MM-DD" (<=)
                 ["", end] => {
-                    qb.push(" AND DATE(study.study_datetime) <= ").push_bind(*end);
+                    qb.push(" AND study.study_datetime < DATE_ADD(")
+                        .push_bind(*end)
+                        .push(", INTERVAL 1 DAY)");
                 }
                 // "YYYY-MM-DD|YYYY-MM-DD" (between)
                 [start, end] => {
-                    qb.push(" AND DATE(study.study_datetime) BETWEEN ")
+                    qb.push(" AND study.study_datetime >= ")
                         .push_bind(*start)
-                        .push(" AND ")
-                        .push_bind(*end);
+                        .push(" AND study.study_datetime < DATE_ADD(")
+                        .push_bind(*end)
+                        .push(", INTERVAL 1 DAY)");
                 }
                 _ => {
                     // If malformed, ignore at DB level; validation should happen at API layer.
@@ -354,7 +382,8 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // Ordering/limit.
-        qb.push(" ORDER BY study.study_iuid ASC, series.series_iuid ASC, CAST(instance.inst_no AS UNSIGNED) ASC, instance.sop_iuid ASC");
+        // Use numeric PKs to avoid expensive CAST() on instance numbers and reduce sort CPU.
+        qb.push(" ORDER BY study.pk ASC, series.pk ASC, instance.pk ASC");
         if let Some(max) = query.max {
             qb.push(" LIMIT ").push_bind(max as u64);
         }
@@ -574,57 +603,71 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         if let Some(value) = query.study_iuid {
             let values: Vec<String> = split_backslash(value).into_iter().map(|s| s.to_string()).collect();
             if !values.is_empty() {
-                qb.push(" AND study.study_iuid IN (");
-                let mut separated = qb.separated(", ");
-                for v in values {
-                    separated.push_bind(v);
+                if values.len() == 1 {
+                    let v = values[0].clone();
+                    qb.push(" AND study.study_iuid = ").push_bind(v);
+                } else {
+                    qb.push(" AND study.study_iuid IN (");
+                    let mut separated = qb.separated(", ");
+                    for v in values {
+                        separated.push_bind(v);
+                    }
+                    separated.push_unseparated(")");
                 }
-                separated.push_unseparated(")");
             }
         }
 
         // Study date: QIDO uses DICOM date range syntax (YYYYMMDD-YYYYMMDD).
         // We also accept ISO-like date strings by extracting digits.
+        // As above, keep predicates sargable by avoiding DATE(study.study_datetime).
         if let Some(value) = query.study_date {
             let raw = value.trim();
             if raw.starts_with('-') {
                 let end = to_dicom_date_digits(raw.trim_start_matches('-'));
                 if end.len() == 8 {
                     if let Some(end_iso) = yyyymmdd_to_iso(&end) {
-                        qb.push(" AND DATE(study.study_datetime) <= ").push_bind(end_iso);
+                        qb.push(" AND study.study_datetime < DATE_ADD(")
+                            .push_bind(end_iso)
+                            .push(", INTERVAL 1 DAY)");
                     }
                 }
             } else if raw.ends_with('-') {
                 let start = to_dicom_date_digits(raw.trim_end_matches('-'));
                 if start.len() == 8 {
                     if let Some(start_iso) = yyyymmdd_to_iso(&start) {
-                        qb.push(" AND DATE(study.study_datetime) >= ").push_bind(start_iso);
+                        qb.push(" AND study.study_datetime >= ").push_bind(start_iso);
                     }
                 }
             } else {
                 let digits = to_dicom_date_digits(raw);
                 if digits.len() == 8 {
                     if let Some(exact_iso) = yyyymmdd_to_iso(&digits) {
-                        qb.push(" AND DATE(study.study_datetime) = ").push_bind(exact_iso);
+                        qb.push(" AND study.study_datetime >= ")
+                            .push_bind(exact_iso.clone())
+                            .push(" AND study.study_datetime < DATE_ADD(")
+                            .push_bind(exact_iso)
+                            .push(", INTERVAL 1 DAY)");
                     }
                 } else if digits.len() == 16 {
                     let start = &digits[0..8];
                     let end = &digits[8..16];
                     if let (Some(start_iso), Some(end_iso)) = (yyyymmdd_to_iso(start), yyyymmdd_to_iso(end)) {
-                        qb.push(" AND DATE(study.study_datetime) BETWEEN ")
+                        qb.push(" AND study.study_datetime >= ")
                             .push_bind(start_iso)
-                            .push(" AND ")
-                            .push_bind(end_iso);
+                            .push(" AND study.study_datetime < DATE_ADD(")
+                            .push_bind(end_iso)
+                            .push(", INTERVAL 1 DAY)");
                     }
                 } else if let Some((start, end)) = raw.split_once('-') {
                     let start = to_dicom_date_digits(start);
                     let end = to_dicom_date_digits(end);
                     if start.len() == 8 && end.len() == 8 {
                         if let (Some(start_iso), Some(end_iso)) = (yyyymmdd_to_iso(&start), yyyymmdd_to_iso(&end)) {
-                            qb.push(" AND DATE(study.study_datetime) BETWEEN ")
+                            qb.push(" AND study.study_datetime >= ")
                                 .push_bind(start_iso)
-                                .push(" AND ")
-                                .push_bind(end_iso);
+                                .push(" AND study.study_datetime < DATE_ADD(")
+                                .push_bind(end_iso)
+                                .push(", INTERVAL 1 DAY)");
                         }
                     }
                 }

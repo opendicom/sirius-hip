@@ -120,12 +120,11 @@ transfer_syntax="1.2.840.10008.1.2.1"
 #
 # Format:
 # metadata_overrides = [
-#   { keyword = "PatientID", source = "patient.pat_id", dataset = false },
-#   { keyword = "StudyDescription", source = "study.study_custom1", dataset = false },
+#   { keyword = "PatientID", source = "patient.pat_id" },
+#   { keyword = "InstitutionName", source = "study.study_custom1" },
 # ]
 #
 # `source` MUST be `table.column`.
-# `dataset=true` means the column contains a DICOM dataset blob; the keyword is extracted by parsing it.
 
 # Dicom Zip
 #buffer = 4096

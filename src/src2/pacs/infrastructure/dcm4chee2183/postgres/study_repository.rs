@@ -25,9 +25,9 @@ impl StudyRepository for Dcm4chee2183PostgresStudyRepository {
         &self,
         query: StudyTokenQuery<'_>,
         include_filesystem: bool,
-        include_wado: bool,
+        include_ohif_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError> {
-        let _ = (query, include_filesystem, include_wado);
+        let _ = (query, include_filesystem, include_ohif_metadata);
         Err(PacsError::UnsupportedDatabase("postgres".to_string()))
     }
 

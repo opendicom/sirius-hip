@@ -1,5 +1,4 @@
 use crate::settings::MetadataOverride;
-use std::collections::BTreeSet;
 
 pub fn is_simple_identifier(s: &str) -> bool {
     let mut chars = s.chars();
@@ -23,33 +22,7 @@ fn parse_override_ref(value: &str) -> Option<(&str, &str)> {
     Some((table, col))
 }
 
-/// Converts a `table.column` string into a safe SQL identifier expression `table.`col``.
-///
-/// This treats the input as identifiers only (not raw SQL).
-pub fn qualified_ident_expr(source: &str) -> Option<String> {
-    let (table, col) = parse_override_ref(source)?;
-    Some(format!("{}.`{}`", table, col))
-}
-
-/// Returns distinct dataset sources (as `table.column`) for overrides where `dataset=true`.
-///
-/// The returned list is sorted to provide deterministic slot assignment.
-pub fn dataset_sources(overrides: Option<&[MetadataOverride]>) -> Vec<String> {
-    let Some(list) = overrides else {
-        return vec![];
-    };
-
-    let mut set: BTreeSet<String> = BTreeSet::new();
-    for ov in list {
-        if ov.dataset {
-            set.insert(ov.source.clone());
-        }
-    }
-
-    set.into_iter().collect()
-}
-
-/// Returns a qualified column expression like `alias.`col`` if the override exists and is safe.
+/// Returns a qualified column expression like `alias.col` if the override exists and is safe.
 ///
 /// `dicom_keyword` is the config key (e.g. "PatientID").
 ///
@@ -63,9 +36,6 @@ pub fn override_col(
 ) -> Option<String> {
     let list = overrides?;
     let ov = list.iter().find(|ov| ov.keyword == dicom_keyword)?;
-    if ov.dataset {
-        return None;
-    }
     let (table, col) = parse_override_ref(&ov.source)?;
     Some(format!("{}.`{}`", table, col))
 }

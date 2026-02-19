@@ -4,7 +4,7 @@ use sqlx::{MySql, MySqlPool, QueryBuilder};
 use crate::src2::errors::PacsError;
 use crate::src2::pacs::read_models::QidoStudyRow;
 use crate::src2::pacs::read_models::StudyTokenRow;
-use crate::src2::pacs::infrastructure::mysql_sql_helpers::{dataset_sources, override_col, override_or_default, qualified_ident_expr};
+use crate::src2::pacs::infrastructure::mysql_sql_helpers::{override_col, override_or_default};
 use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::repositories::study_repository::{
     QidoStudiesIncludeFields, QidoStudiesQuery, StudyTokenQuery,
@@ -26,25 +26,60 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         &self,
         query: StudyTokenQuery<'_>,
         include_filesystem: bool,
-        include_wado: bool,
+        include_ohif_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError> {
+
+        /// Splits a string by backslashes and filters out empty segments.
         fn split_backslash(value: &str) -> Vec<&str> {
             value.split('\\').filter(|s| !s.is_empty()).collect()
         }
 
+        /// Sanitizes a date string by removing dashes, allowing both "YYYY-MM-DD" and "YYYYMMDD" formats.
         fn sanitize_yyyymmdd_maybe(value: &str) -> String {
             value.replace('-', "")
         }
 
-        let use_filesystem_expr = "(
-            ABS(TIMESTAMPDIFF(SECOND, study.created_time, study.updated_time)) <= 600 AND 
-            ABS(TIMESTAMPDIFF(SECOND, series.created_time, series.updated_time)) <= 600 AND 
-            ABS(TIMESTAMPDIFF(SECOND, instance.created_time, instance.updated_time)) <= 600
-        )";
+        // NOTE: `file_ref` can contain multiple rows per instance (e.g. re-ingest/migration).
+        // We must avoid multiplying result rows, otherwise the OHIF presenter work (inst_attrs decoding)
+        // becomes O(k * instances) and response time can roughly double.
+        //
+        // If the caller doesn't need filesystem refs, don't join `file_ref` and force `use_filesystem=false`.
+        let use_filesystem_expr = if include_filesystem {
+            "(
+                ABS(TIMESTAMPDIFF(SECOND, study.created_time, study.updated_time)) <= 600 AND 
+                ABS(TIMESTAMPDIFF(SECOND, series.created_time, series.updated_time)) <= 600 AND 
+                ABS(TIMESTAMPDIFF(SECOND, instance.created_time, instance.updated_time)) <= 600 AND
+                file_ref.filepath IS NOT NULL AND
+                file_ref.filesystem_fk IS NOT NULL
+            )"
+        } else {
+            "(0)"
+        };
 
         let mut qb = QueryBuilder::<MySql>::new("SELECT ");
 
         let overrides = query.metadata_overrides;
+
+        // Join patient tables only when required.
+        // For Cornerstone/Weasis/Zip (no patient fields rendered) we avoid patient joins unless
+        // the request includes patient-level filters.
+        let patient_id_override = override_col(overrides, "PatientID");
+        let needs_patient_name_filter = query.patient_fullname.is_some();
+        let needs_patient_id_filter_on_override = if query.patient_id.is_some() {
+            match patient_id_override.as_deref() {
+                Some(c)
+                    if c.starts_with("patient.")
+                        || c.starts_with("person_name.")
+                        || c.starts_with("patient_id") =>
+                {
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+        let needs_patient_join = include_ohif_metadata || needs_patient_name_filter || needs_patient_id_filter_on_override;
         let patient_name_select = override_or_default(
             overrides,
             "PatientName",
@@ -53,36 +88,19 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         let patient_id_select = override_or_default(
             overrides,
             "PatientID",
-            "(SELECT pid.pat_id FROM patient_id pid WHERE pid.patient_fk = patient.pk ORDER BY pid.pk LIMIT 1)",
+            "patient_id_first.pat_id",
         );
         let patient_sex_select = override_or_default(overrides, "PatientSex", "patient.pat_sex");
         let patient_birthdate_select = override_or_default(overrides, "PatientBirthDate", "patient.pat_birthdate");
         let accession_no_select = override_or_default(overrides, "AccessionNumber", "study.accession_no");
         let modalities_select = override_or_default(overrides, "ModalitiesInStudy", "study.mods_in_study");
         let study_description_select = override_or_default(overrides, "StudyDescription", "study.study_desc");
-
-        // InstitutionName (0008,0080) at study level:
-        // - Default comes from decoding the study dataset (`study_dicomattrs.attrs`).
-        // - Optionally it can be overridden as a direct column value (non-dataset), e.g. `study.study_custom1`.
+        // InstitutionName (0008,0080) is special:
+        // - Default comes from decoding `study_attrs` (currently not selected in src2).
+        // - Optionally it can be overridden as a direct column value.
         let institution_name_select = override_col(overrides, "InstitutionName").unwrap_or_else(|| "NULL".to_string());
 
-        let ds_sources = dataset_sources(overrides);
-
-        // Dataset overrides (`dataset=true`) are delivered to the presenter by selecting up to 4
-        // extra dataset blobs into the row read-model columns `ov_ds1..ov_ds4`.
-        //
-        // `dataset_sources(overrides)` returns the distinct set of override `source` strings
-        // (each is `table.column`) and sorts them to make the mapping deterministic.
-        // The positional slot mapping is:
-        // - ov_ds1 -> ds_sources[0]
-        // - ov_ds2 -> ds_sources[1]
-        // - ov_ds3 -> ds_sources[2]
-        // - ov_ds4 -> ds_sources[3]
-        //
-        // The OHIF presenter recomputes the same `ds_sources` list and uses it to map
-        // a configured override `source` back to the correct `ov_dsN` bytes.
-
-        if include_wado {
+        if include_ohif_metadata {
             qb.push(format!(
                 "{} AS patient_name,
                  {} AS patient_id,
@@ -95,7 +113,7 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
                  study.num_instances1 AS num_instances,
                  {} AS modalities,
                  {} AS institution_name,
-                 study_dicomattrs.attrs AS study_attrs,",
+                 NULL AS study_attrs,",
                 patient_name_select,
                 patient_id_select,
                 patient_sex_select,
@@ -128,7 +146,7 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
              instance.sop_iuid AS sop_instance_uid,",
         );
 
-        if include_wado {
+        if include_ohif_metadata {
             qb.push(
                 "series.series_no AS series_no,
                  series.series_desc AS series_description,
@@ -139,16 +157,6 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
                  instance.sop_cuid AS sop_cuid,
                  dicomattrs.attrs AS inst_attrs,",
             );
-
-            // Select dataset override blobs into fixed slots.
-            // Note: `idx` is 0-based, while `slot` is 1..=4.
-            for (idx, slot) in (1usize..=4).enumerate() {
-                let expr = ds_sources
-                    .get(idx)
-                    .and_then(|s| qualified_ident_expr(s))
-                    .unwrap_or_else(|| "NULL".to_string());
-                qb.push(format!("{} AS ov_ds{},", expr, slot));
-            }
         } else {
             qb.push(
                 "NULL AS series_no,
@@ -158,11 +166,7 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
                  NULL AS instance_pk,
                  NULL AS inst_no,
                  NULL AS sop_cuid,
-                 NULL AS inst_attrs,
-                 NULL AS ov_ds1,
-                 NULL AS ov_ds2,
-                 NULL AS ov_ds3,
-                 NULL AS ov_ds4,",
+                 NULL AS inst_attrs,"
             );
         }
 
@@ -184,15 +188,61 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
 
         qb.push(
             "FROM `study`
-             INNER JOIN `patient` ON patient.pk = study.patient_fk
-             LEFT JOIN `person_name` ON person_name.pk = patient.pat_name_fk
              INNER JOIN `series` ON series.study_fk = study.pk
-             INNER JOIN `instance` ON instance.series_fk = series.pk
-             INNER JOIN `file_ref` ON file_ref.instance_fk = instance.pk
-             LEFT JOIN `dicomattrs` ON dicomattrs.pk = instance.dicomattrs_fk
-             LEFT JOIN `dicomattrs` study_dicomattrs ON study_dicomattrs.pk = study.dicomattrs_fk
-             WHERE 1=1",
+             INNER JOIN `instance` ON instance.series_fk = series.pk",
         );
+
+        if needs_patient_join {
+            qb.push(" INNER JOIN `patient` ON patient.pk = study.patient_fk");
+
+            // `person_name` is only needed for default PatientName expressions.
+            if include_ohif_metadata || needs_patient_name_filter {
+                qb.push(" LEFT JOIN `person_name` ON person_name.pk = patient.pat_name_fk");
+            }
+
+            // Avoid correlated subqueries in SELECT by joining the first patient_id row.
+            // Only needed when rendering OHIF metadata and there is no PatientID override.
+            if include_ohif_metadata && patient_id_override.is_none() {
+                qb.push(
+                    // IMPORTANT: do not use a derived table with GROUP BY over the full `patient_id`.
+                    // For single-study requests (common in /studyToken) that forces MySQL to scan the
+                    // entire patient_id table. A correlated MIN(pk) join is typically much faster
+                    // because it uses the patient_id(patient_fk) index and only touches rows for the
+                    // patient selected by this query.
+                    " LEFT JOIN patient_id patient_id_first
+                        ON patient_id_first.pk = (
+                            SELECT MIN(pid.pk)
+                            FROM patient_id pid
+                            WHERE pid.patient_fk = patient.pk
+                        )",
+                );
+            }
+        }
+
+        if include_filesystem {
+            // IMPORTANT: Avoid a derived table with GROUP BY over the full `file_ref`.
+            // In large PACS databases that can force a scan of `file_ref` even when the
+            // request targets a single study. A correlated MAX(pk) join is typically faster
+            // here because it uses the `file_ref(instance_fk)` index and only touches rows
+            // for the instances selected by this query.
+            qb.push(
+                " LEFT JOIN file_ref
+                    ON file_ref.instance_fk = instance.pk
+                   AND file_ref.pk = (
+                        SELECT MAX(fr2.pk)
+                        FROM file_ref fr2
+                        WHERE fr2.instance_fk = instance.pk
+                   )",
+            );
+        }
+
+        // DICOM dataset blobs are only needed for OHIF rendering.
+        if include_ohif_metadata {
+            qb.push(" LEFT JOIN `dicomattrs` ON dicomattrs.pk = instance.dicomattrs_fk");
+
+        }
+
+        qb.push(" WHERE 1=1");
 
         // ------------------------------------------------------------
         // Dynamic filters based on StudyTokenQuery
@@ -208,7 +258,8 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
             if let Some(col) = override_col(overrides, "PatientID") {
                 qb.push(" AND ").push(col).push(" = ").push_bind(patient_id);
             } else {
-                qb.push(" AND EXISTS (SELECT 1 FROM patient_id pid WHERE pid.patient_fk = patient.pk AND pid.pat_id = ")
+                // Avoid joining `patient` just to filter on patient_id.
+                qb.push(" AND EXISTS (SELECT 1 FROM patient_id pid WHERE pid.patient_fk = study.patient_fk AND pid.pat_id = ")
                     .push_bind(patient_id)
                     .push(")");
             }
@@ -226,12 +277,16 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         if let Some(study_uids) = query.study_instance_uid {
             let values = split_backslash(study_uids);
             if !values.is_empty() {
-                qb.push(" AND study.study_iuid IN (");
-                let mut separated = qb.separated(", ");
-                for v in values {
-                    separated.push_bind(v);
+                if values.len() == 1 {
+                    qb.push(" AND study.study_iuid = ").push_bind(values[0]);
+                } else {
+                    qb.push(" AND study.study_iuid IN (");
+                    let mut separated = qb.separated(", ");
+                    for v in values {
+                        separated.push_bind(v);
+                    }
+                    separated.push_unseparated(")");
                 }
-                separated.push_unseparated(")");
             }
         }
 
@@ -246,8 +301,7 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
 
         // Study ID (LIKE)
         if let Some(study_id) = query.study_id {
-            qb.push(" AND study.study_id LIKE ")
-                .push_bind(format!("%{}%", study_id));
+            qb.push(" AND study.study_id LIKE ").push_bind(format!("%{}%", study_id));
         }
 
         // Study date filter on s.study_date (string YYYYMMDD in dcm4chee 4.4)
@@ -277,7 +331,7 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
                         .push_bind(sanitize_yyyymmdd_maybe(end));
                 }
                 _ => {
-                    // Malformed; ignore at DB level.
+                    // If malformed, ignore at DB level; validation should happen at API layer.
                 }
             }
         }
@@ -363,7 +417,9 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         }
 
         // Ordering/limit.
-        qb.push(" ORDER BY study.study_iuid ASC, series.series_iuid ASC, CAST(instance.inst_no AS UNSIGNED) ASC, instance.sop_iuid ASC");
+        // Use numeric PKs to avoid expensive CAST() on instance numbers and reduce sort CPU.
+        // Any deterministic order is fine (file_index is just an internal stable mapping).
+        qb.push(" ORDER BY study.pk ASC, series.pk ASC, instance.pk ASC");
         if let Some(max) = query.max {
             qb.push(" LIMIT ").push_bind(max as u64);
         }
@@ -654,12 +710,17 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
                 .map(|s| s.to_string())
                 .collect();
             if !values.is_empty() {
-                qb.push(" AND study.study_iuid IN (");
-                let mut separated = qb.separated(", ");
-                for v in values {
-                    separated.push_bind(v);
+                if values.len() == 1 {
+                    let v = values[0].clone();
+                    qb.push(" AND study.study_iuid = ").push_bind(v);
+                } else {
+                    qb.push(" AND study.study_iuid IN (");
+                    let mut separated = qb.separated(", ");
+                    for v in values {
+                        separated.push_bind(v);
+                    }
+                    separated.push_unseparated(")");
                 }
-                separated.push_unseparated(")");
             }
         }
 
