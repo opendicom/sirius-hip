@@ -22,73 +22,55 @@ Notes:
 - `docker-compose-dev.yml` loads `docker-compose.env` + `docker-compose.dev.env`.
  
 ## Environment variables
-it is possible to configure several parameters through environment variables.
+Sirius HIP Docker image supports the following environment variables.
 
-#### `SIRIUS_HIP_LOGLEVEL` 
-Optional variable. Default value: `info`.
+### Core
+- `SIRIUS_HIP_LOGLEVEL` (default: `info`)
+- `SIRIUS_HIP_MAX_DEFAULT` (default: `5000`)
+- `CORS_WHITELIST` (default: `["*"]`)
 
-#### `CORS_WHITELIST` 
-Optional variable. Default value: `["*"]`.
+### JWT
+- `SIRIUS_HIP_JWT_AUTH` (default: `none`, values: `none|standard|onetime`)
+- `AUTH_JWT_SECRET` (default: `secret`)
+- `AUTH_JWT_ALGO` (default: `HS256`)
 
-#### `SIRIUS_HIP_JWT_AUTH` 
-Optional variable. Values: `none`, `standard`, `onetime`.
+### PACS routing helpers
+- `PACS_HOST` (default: `opendicom_pacs`)
+- `PACS_PORT` (default: `8080`)
 
-#### `AUTH_JWT_SECRET`
-Optional variable. Default value: `secret`.
+### PACS configuration (`[dicomarchive]`)
+- `SIRIUS_HIP_PACS_VERSION` (default: `dcm4chee2183`)
+- `SIRIUS_HIP_PACS_WADOURI` (default: `http://${PACS_HOST}:${PACS_PORT}/wado`)
+- `SIRIUS_HIP_TRANSFER_SYNTAX` (default: `1.2.840.10008.1.2.1`)
+- `SIRIUS_HIP_FILESYSTEM_CUTOFF_DATE` (default: `2026-03-01`)
+- `SIRIUS_HIP_FS_MAPPINGS` (default: `[{id=1,path="/DICOM/archive"}]`)
+- `SIRIUS_HIP_CUSTODIAN_OID` (optional, default: unset)
+- `SIRIUS_HIP_PACS_OID` (optional, default: unset)
+- `SIRIUS_HIP_PACS_AET` (optional, default: unset)
+- `SIRIUS_HIP_MANIFEST_BASE_URL` (optional, default: unset)
+- `SIRIUS_HIP_NUM_FRAMES_FIELD` (optional, default: unset)
+- `SIRIUS_HIP_INSTITUTION_FIELD` (optional, default: unset)
 
-#### `AUTH_JWT_ALGO` 
-Optional variable. Default value: `HS256`.
+### PACS database connection
+- `SIRIUS_HIP_PACS_DATABASE_URL` (default derived from MySQL vars below)
+- `SIRIUS_HIP_PACS_DATABASE_MAX_CONNECTIONS` (default: `40`)
 
-#### `PACS_HOST` 
-Optional variable. Default value: `opendicom_pacs`.
+### App database connection (download sessions / one-time)
+- `SIRIUS_HIP_APP_DATABASE_URL` (default derived from MySQL vars below)
+- `SIRIUS_HIP_APP_DATABASE_MAX_CONNECTIONS` (default: `20`)
 
-#### `PACS_PORT` 
-Optional variable. Default value: `8080`.
+### OneTime cleanup (`[onetime_cleanup]`)
+- `SIRIUS_HIP_ONETIME_CLEANUP_ENABLED` (default: `true`)
+- `SIRIUS_HIP_ONETIME_CLEANUP_INTERVAL_SECS` (default: `300`)
+- `SIRIUS_HIP_ONETIME_CLEANUP_RETENTION_HOURS` (default: `24`)
+- `SIRIUS_HIP_ONETIME_CLEANUP_SESSION_BATCH` (default: `200`)
+- `SIRIUS_HIP_ONETIME_CLEANUP_MAX_BATCHES` (default: `20`)
+- `SIRIUS_HIP_ONETIME_CLEANUP_TOKEN_DELETE_LIMIT` (default: `5000`)
+- `SIRIUS_HIP_ONETIME_CLEANUP_INITIAL_JITTER_MAX_SECS` (default: `60`)
 
-#### `SIRIUS_HIP_PACS_VERSION` 
-Optional variable. Default value: `dcm4chee2183`.
-
-#### `SIRIUS_HIP_PACS_WADOURI` 
-Optional variable. Default value: `http://${PACS_HOST}:8080/wado`.
-
-#### `SIRIUS_HIP_FS_MAPPINGS` 
-Optional variable. Default value: `[{id=1,path="/DICOM/archive"}]`.
-
-#### `SIRIUS_HIP_CUSTODIAN_OID` 
-Optional variable. Default value: unset.
-
-#### `SIRIUS_HIP_PACS_OID` 
-Optional variable. Default value: unset.
-
-#### `SIRIUS_HIP_PACS_AET` 
-Optional variable. Default value: unset.
-
-#### `SIRIUS_HIP_MANIFEST_BASE_URL` 
-Optional variable. Default value: unset.
-
-#### `SIRIUS_HIP_NUM_FRAMES_FIELD` 
-Optional variable. Default value: unset.
-
-#### `SIRIUS_HIP_INSTITUTION_FIELD` 
-Optional variable. Default value: unset.
-
-#### `SIRIUS_HIP_TRANSFER_SYNTAX` 
-Optional variable. Default value: `1.2.840.10008.1.2.1`.
-
-#### `SIRIUS_HIP_MAX_DEFAULT` 
-Optional variable. Default value: `5000`.
-
-#### `MYSQL_HOST` 
-Optional variable. Default value: `opendicom_pacs_db`.
-
-#### `MYSQL_PORT` 
-Optional variable. Default value: `3306`.
-
-#### `MYSQL_DATABASE` 
-Optional variable. Default value: `pacsdb`.
-
-#### `MYSQL_USER` 
-Optional variable. Default value: `pacs`.
-
-#### `MYSQL_PASSWORD` 
-Optional variable. Default value: `pacs`.
+### MySQL helper variables (used to build default DB URLs)
+- `MYSQL_HOST` (default: `opendicom_pacs_db`)
+- `MYSQL_PORT` (default: `3306`)
+- `MYSQL_DATABASE` (default: `pacsdb`)
+- `MYSQL_USER` (default: `pacs`)
+- `MYSQL_PASSWORD` (default: `pacs`)

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use sqlx::{MySql, MySqlPool, QueryBuilder};
+use chrono::NaiveDateTime;
+use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
 
 use crate::src2::errors::PacsError;
 use crate::src2::pacs::read_models::QidoStudyRow;
@@ -12,11 +13,120 @@ use crate::src2::pacs::repositories::study_repository::{
 
 pub struct Dcm4chee440MySqlStudyRepository {
     pool: MySqlPool,
+    filesystem_cutoff_date: Option<NaiveDateTime>,
+    dirty_table_available: bool,
 }
 
 impl Dcm4chee440MySqlStudyRepository {
-    pub fn new(pool: MySqlPool) -> Self {
-        Self { pool }
+    pub async fn new(
+        pool: MySqlPool,
+        filesystem_cutoff_date: Option<NaiveDateTime>,
+    ) -> Result<Self, PacsError> {
+        let dirty_table_available = Self::ensure_dirty_table(&pool).await;
+
+        // Triggers are created manually (scripts/mysql/*_dirty_triggers.sql).
+        // Enforce presence at startup to avoid silently running without the sticky dirty signal.
+        Self::require_dirty_triggers(&pool).await?;
+
+        Ok(Self {
+            pool,
+            filesystem_cutoff_date,
+            dirty_table_available,
+        })
+    }
+
+    async fn require_dirty_triggers(pool: &MySqlPool) -> Result<(), PacsError> {
+        let required = [
+            "hip_dirty_study_u_patient",
+            "hip_dirty_study_u_patient_id",
+            "hip_dirty_study_u_person_name",
+            "hip_dirty_study_u_study",
+            "hip_dirty_study_u_series",
+            "hip_dirty_study_u_instance",
+        ];
+
+        let rows = sqlx::query(
+            "SELECT TRIGGER_NAME AS name \
+             FROM information_schema.triggers \
+             WHERE TRIGGER_SCHEMA = DATABASE() \
+             AND TRIGGER_NAME IN (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(required[0])
+        .bind(required[1])
+        .bind(required[2])
+         .bind(required[3])
+         .bind(required[4])
+         .bind(required[5])
+        .fetch_all(pool)
+        .await?;
+
+        let mut present = std::collections::HashSet::with_capacity(required.len());
+        for row in rows {
+            let name: String = row.get("name");
+            present.insert(name);
+        }
+
+        let missing = required
+            .iter()
+            .filter(|t| !present.contains(**t))
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>();
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(PacsError::MissingRequiredTriggers { missing })
+        }
+    }
+
+    /// Ensures the `HIP_dirty_study` table exists.
+    /// If it cannot be created/verified (e.g. read-only user), filesystem delivery is disabled.
+    async fn ensure_dirty_table(pool: &MySqlPool) -> bool {
+        async fn table_exists(pool: &MySqlPool, table_name: &str) -> bool {
+            sqlx::query(
+                "SELECT COUNT(*) AS cnt FROM information_schema.tables \
+                 WHERE table_schema = DATABASE() AND table_name = ?",
+            )
+            .bind(table_name)
+            .fetch_one(pool)
+            .await
+            .map(|row| {
+                let cnt: i64 = row.get("cnt");
+                cnt > 0
+            })
+            .unwrap_or(false)
+        }
+
+        let name = "HIP_dirty_study";
+        if table_exists(pool, name).await {
+            return true;
+        }
+
+        let ddl = r#"
+            CREATE TABLE IF NOT EXISTS HIP_dirty_study (
+              study_iuid     VARCHAR(250) BINARY NOT NULL,
+              dirty_since    DATETIME NOT NULL,
+              last_dirty_at  DATETIME NOT NULL,
+              reason         VARCHAR(64)  BINARY NOT NULL,
+              source_table   VARCHAR(16)  BINARY NOT NULL,
+              PRIMARY KEY (study_iuid),
+              INDEX hip_dirty_last_dirty_at (last_dirty_at)
+            ) ENGINE=INNODB
+        "#;
+
+        match sqlx::query(ddl).execute(pool).await {
+            Ok(_) => {
+                let ok = table_exists(pool, name).await;
+                if !ok {
+                    log::warn!("Could not verify presence of {name}; filesystem delivery will be disabled");
+                }
+                ok
+            }
+            Err(e) => {
+                log::warn!("Could not create {name}: {e}; filesystem delivery will be disabled");
+                false
+            }
+        }
     }
 }
 
@@ -39,23 +149,14 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
             value.replace('-', "")
         }
 
-        // NOTE: `file_ref` can contain multiple rows per instance (e.g. re-ingest/migration).
-        // We must avoid multiplying result rows, otherwise the OHIF presenter work (inst_attrs decoding)
-        // becomes O(k * instances) and response time can roughly double.
-        //
-        // If the caller doesn't need filesystem refs, don't join `file_ref` and force `use_filesystem=false`.
-        let use_filesystem_expr = if include_filesystem {
-            "(
-                ABS(TIMESTAMPDIFF(SECOND, study.created_time, study.updated_time)) <= 600 AND 
-                ABS(TIMESTAMPDIFF(SECOND, series.created_time, series.updated_time)) <= 600 AND 
-                ABS(TIMESTAMPDIFF(SECOND, instance.created_time, instance.updated_time)) <= 600 AND
-                file_ref.filepath IS NOT NULL AND
-                file_ref.filesystem_fk IS NOT NULL
-            )"
-        } else {
-            "(0)"
-        };
+        // Common case optimisation: /studyToken frequently targets a single study.
+        // When study_instance_uid is provided, restrict MAX(series.created_time) aggregation
+        // to those studies to avoid scanning/grouping the full `series` table.
+        let study_uid_values = query.study_instance_uid.map(split_backslash);
 
+        // Filesystem/WADO selection (cutoff date):
+        // - Before cutoff: always WADO.
+        // - On/after cutoff: filesystem is allowed ONLY when the study is NOT marked dirty.
         let mut qb = QueryBuilder::<MySql>::new("SELECT ");
 
         let overrides = query.metadata_overrides;
@@ -171,19 +272,31 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         }
 
         if include_filesystem {
-            qb.push("IF(");
-            qb.push(use_filesystem_expr);
-            qb.push(", file_ref.filepath, NULL) AS relative_file_path,");
-
-            qb.push("IF(");
-            qb.push(use_filesystem_expr);
-            qb.push(", CAST(file_ref.filesystem_fk AS SIGNED), NULL) AS filesystem_fk,");
+            // Always select the raw file reference columns; Rust will use them only
+            // when `use_filesystem` is true, avoiding a triple evaluation of the
+            // stability expression.
+            qb.push("file_ref.filepath AS relative_file_path,");
+            qb.push("CAST(file_ref.filesystem_fk AS SIGNED) AS filesystem_fk,");
         } else {
             qb.push("NULL AS relative_file_path, NULL AS filesystem_fk,");
         }
 
         qb.push("CASE WHEN ");
-        qb.push(use_filesystem_expr);
+        if include_filesystem && self.dirty_table_available {
+            if let Some(cutoff) = self.filesystem_cutoff_date.as_ref() {
+                qb.push("(study.created_time >= ")
+                    .push_bind(cutoff.clone())
+                    .push(" AND NOT EXISTS (SELECT 1 FROM HIP_dirty_study ds WHERE ds.study_iuid = study.study_iuid)")
+                    .push(" AND file_ref.filesystem_fk IS NOT NULL")
+                    .push(" AND file_ref.filepath IS NOT NULL")
+                    .push(" AND file_ref.filepath <> ''")
+                    .push(")");
+            } else {
+                qb.push("(0)");
+            }
+        } else {
+            qb.push("(0)");
+        }
         qb.push(" THEN 1 ELSE 0 END AS use_filesystem ");
 
         qb.push(
@@ -273,9 +386,8 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
             qb.push(" AND ").push(patient_name_where).push(" REGEXP ").push_bind(patient_regex);
         }
 
-        // StudyInstanceUID: one-or-more separated by '\\'
-        if let Some(study_uids) = query.study_instance_uid {
-            let values = split_backslash(study_uids);
+        // StudyInstanceUID: one-or-more separated by '\'
+        if let Some(values) = study_uid_values.as_ref() {
             if !values.is_empty() {
                 if values.len() == 1 {
                     qb.push(" AND study.study_iuid = ").push_bind(values[0]);
@@ -283,7 +395,7 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
                     qb.push(" AND study.study_iuid IN (");
                     let mut separated = qb.separated(", ");
                     for v in values {
-                        separated.push_bind(v);
+                        separated.push_bind(*v);
                     }
                     separated.push_unseparated(")");
                 }

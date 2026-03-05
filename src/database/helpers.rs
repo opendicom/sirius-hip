@@ -110,16 +110,3 @@ pub fn calculate_age(birthdate: String) -> anyhow::Result<i64> {
     let age = age.num_days()/365;
     Ok(age)
 }
-
-
-
-/// Pretty print sql queries
-pub fn _prettysql(query: &str) -> String {
-    format!("\n{}",
-        sqlformat::format(
-            query,
-            &sqlformat::QueryParams::None, 
-            sqlformat::FormatOptions::default()
-        )
-    )
-}

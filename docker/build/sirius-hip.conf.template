@@ -78,6 +78,10 @@ wadouri= "${SIRIUS_HIP_PACS_WADOURI}"
 # Implicit VR Endian            1.2.840.10008.1.2
 transfer_syntax="${SIRIUS_HIP_TRANSFER_SYNTAX}"
 
+# Required when `filesystems` is configured.
+# Filesystem delivery is enabled only for studies created on/after this cutoff.
+filesystem_cutoff_date = "${SIRIUS_HIP_FILESYSTEM_CUTOFF_DATE}"
+
 # Optional
 # Sets how to get the number of frames in an instance
 # The default behavior for a multi-frame instance is to look in the database field instance.ins_attrs and parse binary data stored there.

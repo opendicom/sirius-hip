@@ -8,6 +8,7 @@ use anyhow::Context;
 use dicom_encoding::TransferSyntaxIndex;
 use dicom_object::InMemDicomObject;
 use dicom_transfer_syntax_registry::TransferSyntaxRegistry;
+use std::path::{Component, Path};
 
 use crate::api::study_token::params::StudyTokenParams;
 use crate::auth::{self, AuthClaims};
@@ -718,11 +719,19 @@ fn build_absolute_filesystem_path(settings: &Settings, row: &crate::src2::pacs::
     let fs_id = row.filesystem_fk?;
     let rel = row.relative_file_path.as_deref()?;
     let base = settings.dicomarchive.get_fs_path_by_id(fs_id)?;
-    Some(format!(
-        "{}/{}",
-        base.trim_end_matches('/'),
-        rel.trim_start_matches('/')
-    ))
+
+    let rel_path = Path::new(rel);
+    if rel_path.is_absolute() {
+        return None;
+    }
+    for comp in rel_path.components() {
+        match comp {
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+            Component::CurDir | Component::Normal(_) => {}
+        }
+    }
+
+    Path::new(base).join(rel_path).to_str().map(|s| s.to_string())
 }
 
 // endregion: === HELPERS FUNCTIONS ======================================================== //
@@ -745,8 +754,12 @@ pub async fn execute_study_token(
     server_base_url: &str,
 ) -> Result<StudyTokenOutput, AppError> {
 
-        let access_type = AccessType::from_param(params.access_type.as_str())
-            .ok_or_else(|| AppError::bad_request("missing required parameter"))?;
+        let access_type = AccessType::from_param(params.access_type.as_str()).ok_or_else(|| {
+            AppError::bad_request(format!(
+                "unsupported accessType: {} (supported: ohif, weasis.xml, dicom.zip, cornerstone.json)",
+                params.access_type
+            ))
+        })?;
 
 
         // --------------------------------------------------------------
@@ -812,14 +825,22 @@ pub async fn execute_study_token(
         // ------------------------------------------------------------
         let include_ohif_metadata = matches!(access_type, AccessType::Ohif);
 
+        // Viewer-style clients (OHIF/Weasis/Cornerstone) need per-instance retrieval URLs.
+        let needs_download_urls = matches!(
+            access_type,
+            AccessType::Ohif | AccessType::Weasis | AccessType::Cornerstone
+        );
+
         // Only request filesystem references when we can actually use them.
-        // - OneTime: we may persist filesystem refs per file.
+        // - OneTime: we persist per-file refs for enforced downloads.
         // - ZIP: we may prefer file:// sources when available.
-        // - OHIF: presenter does no disk I/O during /studyToken, so filesystem refs aren't needed.
+        // - Viewer-style (OHIF/Weasis/Cornerstone): we embed filesystem refs into local
+        //   download URLs/tokens so the /files endpoint can serve FS-first (with WADO fallback).
         let filesystem_configured = !settings.dicomarchive.filesystems.is_empty();
         let include_filesystem = filesystem_configured
             && (matches!(settings.jwt_auth, JwtAuthMethod::OneTime)
-            || matches!(access_type, AccessType::Zip));
+                || matches!(access_type, AccessType::Zip)
+                || needs_download_urls);
 
         let rows = study_repo
             .fetch_study_token_rows(
@@ -830,6 +851,25 @@ pub async fn execute_study_token(
             )
             .await
             .map_err(AppError::Pacs)?;
+
+        // If the PACS indicates a row is eligible for filesystem retrieval, it MUST provide
+        // a filesystem reference. Missing refs when `use_filesystem = true` indicates inconsistent
+        // PACS data and should not silently fall back to WADO.
+        if include_filesystem {
+            for r in &rows {
+                if r.use_filesystem {
+                    let has_fs = r.filesystem_fk.is_some()
+                        && matches!(r.relative_file_path.as_deref(), Some(p) if !p.is_empty());
+                    if !has_fs {
+                        return Err(AppError::MissingFilesystemReference {
+                            study_uid: r.study_instance_uid.clone(),
+                            series_uid: r.series_instance_uid.clone(),
+                            sop_uid: r.sop_instance_uid.clone(),
+                        });
+                    }
+                }
+            }
+        }
 
         // ------------------------------------------------------------
         // 4. CREATE DOWNLOAD SESSION (ONLY IF OneTime)
@@ -892,9 +932,6 @@ pub async fn execute_study_token(
             .unwrap_or(settings.dicomarchive.manifest_base_url.clone()
             .unwrap_or(server_base_url.to_string()));
 
-        // Viewer-style clients (OHIF/Weasis/Cornerstone) need per-instance URLs.
-        let needs_download_urls = matches!(access_type, AccessType::Ohif | AccessType::Weasis | AccessType::Cornerstone);
-
         // Standard/None: build stateless signed download tokens.
         let token_urls = if session_id.is_none() && needs_download_urls {
             let now = Utc::now().timestamp().max(0) as usize;
@@ -914,8 +951,12 @@ pub async fn execute_study_token(
                     study_uid: r.study_instance_uid.clone(),
                     series_uid: r.series_instance_uid.clone(),
                     sop_uid: r.sop_instance_uid.clone(),
-                    filesystem_fk: r.filesystem_fk,
-                    relative_file_path: r.relative_file_path.clone(),
+                    filesystem_fk: if r.use_filesystem { r.filesystem_fk } else { None },
+                    relative_file_path: if r.use_filesystem {
+                        r.relative_file_path.clone()
+                    } else {
+                        None
+                    },
                 };
                 let token = auth::encode_download_token(&claims, settings.as_ref())
                     .map_err(|_| AppError::unauthorized("unauthorized"))?;

@@ -1,0 +1,12 @@
+[mysqld]
+
+# =========================
+# GENERAL QUERY LOG
+# =========================
+
+general_log = 1
+general_log_file = /var/log/mysql/general.log
+log_output = FILE
+
+# Opcional: incluir errores también
+log_error = /var/log/mysql/error.log

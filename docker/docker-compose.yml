@@ -39,7 +39,7 @@ services:
       - opendicom_net
 
   opendicom_ohif:
-    image: ohif/app:v3.7.0
+    image: ohif/app:v3.11.0
     container_name: opendicom_ohif
     depends_on:
       - opendicom_pacs

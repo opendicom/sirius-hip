@@ -1,6 +1,9 @@
 use actix_web::HttpResponse;
 use actix_web::web;
+use actix_web::http::StatusCode;
+use actix_web::http::header::{HeaderName, HeaderValue};
 use futures::StreamExt;
+use std::path::{Component, Path};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 use reqwest;
@@ -29,13 +32,21 @@ fn wado_url_from_uids(
 
 /// Proxies a WADO response by streaming the bytes back to the client while preserving headers and status code.
 fn proxy_wado_response(res: reqwest::Response) -> Result<HttpResponse, AppError> {
-    let mut out = HttpResponse::build(res.status());
+    let status = StatusCode::from_u16(res.status().as_u16())
+        .map_err(|e| AppError::Internal(e.into()))?;
+    let mut out = HttpResponse::build(status);
     for (header_name, header_value) in res
         .headers()
         .iter()
-        .filter(|(h, _)| *h != "connection")
+        .filter(|(h, _)| !h.as_str().eq_ignore_ascii_case("connection"))
     {
-        out.insert_header((header_name.clone(), header_value.clone()));
+        let Ok(header_name) = HeaderName::from_bytes(header_name.as_str().as_bytes()) else {
+            continue;
+        };
+        let Ok(header_value) = HeaderValue::from_bytes(header_value.as_bytes()) else {
+            continue;
+        };
+        out.insert_header((header_name, header_value));
     }
 
     Ok(out.streaming(res.bytes_stream().map(|chunk| {
@@ -53,9 +64,24 @@ async fn proxy_wado_url(client: &reqwest::Client, url: String) -> Result<HttpRes
     proxy_wado_response(res)
 }
 
+/// Safely joins a base path with a relative path, ensuring that the resulting path does not escape the base directory.
+fn safe_join_filesystem_path(base: &str, rel: &str) -> Option<String> {
+    let rel_path = Path::new(rel);
+    if rel_path.is_absolute() {
+        return None;
+    }
+    for comp in rel_path.components() {
+        match comp {
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+            Component::CurDir | Component::Normal(_) => {}
+        }
+    }
+    Path::new(base).join(rel_path).to_str().map(|s| s.to_string())
+}
+
 
 // =============================================================================================== //
-// HTTP HANDLER - /file/{token}                                                                    //
+// HTTP HANDLER - /files/{token}                                                                   //
 // =============================================================================================== //
 
 
@@ -75,13 +101,8 @@ pub async fn download_token_handler(
     // --------------------------------------------------------------
     if let (Some(fs_id), Some(rel)) = (claims.filesystem_fk, claims.relative_file_path.as_deref()) {
         if let Some(base) = state.settings.dicomarchive.get_fs_path_by_id(fs_id) {
-            let abs_path = format!(
-                "{}/{}",
-                base.trim_end_matches('/'),
-                rel.trim_start_matches('/')
-            );
-
-            if let Ok(file) = File::open(&abs_path).await {
+            if let Some(abs_path) = safe_join_filesystem_path(base, rel) {
+                if let Ok(file) = File::open(&abs_path).await {
                 let stream = ReaderStream::new(file).map(|chunk| {
                     chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
                 });
@@ -92,6 +113,7 @@ pub async fn download_token_handler(
                         format!("attachment; filename=\"{}.dcm\"", claims.sop_uid),
                     ))
                     .streaming(stream));
+                }
             }
         }
     }
@@ -143,13 +165,8 @@ pub async fn download_file_handler(
     // Try filesystem first.
     if let (Some(fs_id), Some(rel)) = (f.filesystem_fk, f.relative_file_path.as_deref()) {
         if let Some(base) = state.settings.dicomarchive.get_fs_path_by_id(fs_id) {
-            let abs_path = format!(
-                "{}/{}",
-                base.trim_end_matches('/'),
-                rel.trim_start_matches('/')
-            );
-
-            if let Ok(file) = File::open(&abs_path).await {
+            if let Some(abs_path) = safe_join_filesystem_path(base, rel) {
+                if let Ok(file) = File::open(&abs_path).await {
                 let stream = ReaderStream::new(file).map(|chunk| {
                     chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
                 });
@@ -160,6 +177,7 @@ pub async fn download_file_handler(
                         format!("attachment; filename=\"{}.dcm\"", f.instance_uid),
                     ))
                     .streaming(stream));
+                }
             }
         }
     }

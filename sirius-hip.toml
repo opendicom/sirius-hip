@@ -15,8 +15,10 @@ cors_whitelist=["http://localhost:3000"]
 # Example: Storing one-time tokens for JWT authorization
 # THIS DATABASE IS INDEPENDENT OF THE BACKEND PACS DATABASE
 # It will create the necessary tables automatically if they do not exist:
-# - HIP_sessions
-# - HIP_session_files
+# - HIP_download_sessions
+# - HIP_download_session_files
+# - HIP_download_session_claims
+# - HIP_one_time_tokens
 app_database_url = "mysql://pacs:pacs@localhost:3306/pacsdb"
 # Optional
 # App Database maximum connection limit
@@ -101,6 +103,10 @@ wadouri= "http://localhost:8080/dcm4chee-arc/wado/DCM4CHEE"
 # Implicit VR Endian            1.2.840.10008.1.2
 # JPEG 2000 Lossless Only       1.2.840.10008.1.2.4.90
 transfer_syntax="1.2.840.10008.1.2.1"
+
+# Required when `filesystems` is configured.
+# Filesystem delivery is enabled only for studies created on/after this cutoff.
+filesystem_cutoff_date = "2026-03-01"
 
 # Optional
 # Sets how to get the number of frames in an instance

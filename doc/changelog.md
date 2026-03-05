@@ -6,6 +6,37 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-02
+### Changed
+- FS vs WADO selection is now consistently **FS-first** for viewer-style clients (OHIF/Weasis/Cornerstone) when eligible (post-cutoff and not dirty), regardless of `jwt_auth` mode.
+- `dicomarchive.filesystem_cutoff_date` is interpreted as a **PACS-local** date/datetime (no timezone suffixes), to match PACS MySQL `DATETIME` semantics.
+- Guardrail in PACS SQL: `use_filesystem` is only true when filesystem references are present (filesystem id + non-empty relative path), avoiding hard failures due to inconsistent PACS file reference data.
+
+### Removed
+- Removed the legacy timestamp-based FS vs WADO stability heuristic and its configuration knob.
+  - Filesystem selection now uses `dicomarchive.filesystem_cutoff_date` + a persistent dirty signal (`HIP_dirty_study`) in the PACS DB.
+
+## [1.2.0] - 2026-02-20
+### Added
+- Startup index bootstrap for MySQL study repositories (dcm4chee 2.18.3 and 4.4.0):
+  - `series(study_fk, updated_time)`
+  - `instance(series_fk, updated_time)`
+  - Indexes are created only when missing.
+
+### Changed
+- FS vs WADO selection heuristic study repositories updated to cross-entity stability checks:
+  - Study-level propagation to all series/instances.
+  - Series-level propagation to all instances.
+  - Instance-level stability check based on `updated_time` vs `created_time` plus window.
+- SQL selection logic optimized for performance:
+  - Replaced `MAX(...)` patterns with correlated `EXISTS` checks.
+  - Reordered predicates for cheaper short-circuit evaluation.
+  - Removed repeated evaluation of the stability expression in SELECT projections.
+- Study repository factory now initializes MySQL repositories asynchronously to support startup index/bootstrap tasks.
+
+### Documentation
+- Updated FS/WADO selection documentation.
+
 ## [1.1.0] - 2026-02-16
 ### Added
 - New optimized QIDO-RS endpoint for studies: **`/qido/studies`**

@@ -1,4 +1,6 @@
 use actix_web::{HttpRequest, web, HttpResponse,dev::PeerAddr};
+use actix_web::http::StatusCode;
+use actix_web::http::header::{HeaderName, HeaderValue};
 use reqwest::Method;
 use serde::{Serialize, Deserialize};
 
@@ -61,14 +63,28 @@ pub async fn endpoint(_params: web::Query<Params>, req: HttpRequest, settings: w
         .await
         .map_err(|e| HttpError::new_http_err(actix_web::error::ErrorInternalServerError(e)))?;
 
-    let mut client_resp = HttpResponse::build(res.status());
+    let status = StatusCode::from_u16(res.status().as_u16())
+        .map_err(|e| HttpError::new_http_err(actix_web::error::ErrorInternalServerError(e)))?;
+    let mut client_resp = HttpResponse::build(status);
     // Remove `Connection` as per
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Connection#Directives
-    for (header_name, header_value) in res.headers().iter().filter(|(h, _)| *h != "connection") {
-        client_resp.insert_header((header_name.clone(), header_value.clone()));
+    for (header_name, header_value) in res
+        .headers()
+        .iter()
+        .filter(|(h, _)| !h.as_str().eq_ignore_ascii_case("connection"))
+    {
+        let Ok(header_name) = HeaderName::from_bytes(header_name.as_str().as_bytes()) else {
+            continue;
+        };
+        let Ok(header_value) = HeaderValue::from_bytes(header_value.as_bytes()) else {
+            continue;
+        };
+        client_resp.insert_header((header_name, header_value));
     }
 
-    Ok(client_resp.streaming(res.bytes_stream()))
+    Ok(client_resp.streaming(res.bytes_stream().map(|chunk| {
+        chunk.map_err(|e| actix_web::error::ErrorInternalServerError(e))
+    })))
 
 
     // let wadourl = format!("{}?{}",settings.dicomarchive.wadouri,req.query_string());

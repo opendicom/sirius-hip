@@ -1,6 +1,6 @@
-# WADO vs Filesystem selection (src2)
+# WADO vs Filesystem Selection
 
-This document explains how Sirius HIP selects the retrieval source for DICOM instances when handling `/studyToken`, and how the actual byte delivery happens in `/files/...`.
+This document explains how Sirius HIP selects the retrieval source for DICOM instances when handling `/studyToken`, and how the actual byte delivery happens in `/files/...` endpoints.
 
 ## Why there are two sources
 
@@ -11,14 +11,7 @@ Sirius HIP can retrieve a DICOM instance in two different ways:
 
 The goal is to **prefer the fastest and cheapest source** (filesystem) when it is safe, but still be **robust** during ingestion/migration windows or when the archive file is not available locally (fallback to WADO).
 
-In addition, the selection uses a *stability heuristic* based on database timestamps: **`created_time` vs `updated_time`**.
-Some DICOM-related values can be changed/normalized in the PACS database without immediately producing a finalized, merged on-disk representation. When we detect a large divergence between `created_time` and `updated_time`, we assume the entity was modified “in DB” and we prefer **WADO**, so the backend PACS can serve the authoritative object after applying its own merge/overlay rules.
-These updates can happen at **study**, **series**, or **instance** level.
-
-In other words:
-
-- FS is used when the PACS state looks *stable* (small `created_time`/`updated_time` delta at study/series/instance) and a valid file reference exists.
-- WADO is used otherwise, because it is the authoritative retrieval method when the filesystem reference might be stale, incomplete, missing, or when DB-level updates require the PACS to build the final merged content.
+The selection algorithm is intentionally conservative: it uses filesystem only for studies that are within an explicit rollout window and are not marked as “dirty”. Otherwise it prefers WADO, which remains the authoritative retrieval path.
 
 ## High-level request flow
 
@@ -44,7 +37,7 @@ This fallback is a key reliability feature.
 
 ## Where the FS vs WADO decision is made
 
-The decision is primarily made in the **PACS SQL query** used by the src2 study repository implementations. The repository returns per-instance rows with:
+The decision is primarily made in the **PACS SQL query** used by the study repository implementations. The repository returns per-instance rows with:
 
 - `use_filesystem: bool`
 - `filesystem_fk: Option<i32>`
@@ -58,99 +51,84 @@ These fields are precomputed in SQL so that `/studyToken` can be fast and predic
 
 - The server must have filesystem mounts configured (`settings.dicomarchive.filesystems` not empty).
 - The request must be in a mode that benefits from FS refs:
-  - `JwtAuthMethod::OneTime` (session-backed downloads may persist FS refs), or
-  - `accessType=dicom.zip` (ZIP may prefer `file://...` sources).
-
-For viewer-style responses (OHIF/Weasis/Cornerstone), filesystem refs are not required during `/studyToken` rendering.
+  - `JwtAuthMethod::OneTime` (session-backed downloads persist FS refs), or
+  - `accessType=dicom.zip` (ZIP may prefer `file://...` sources), or
+  - viewer-style responses (OHIF/Weasis/Cornerstone), where filesystem refs are embedded into local `/files/...` URLs/tokens so downloads can be **FS-first**.
 
 ## Current selection logic (as implemented today)
 
-In the MySQL study repositories (dcm4chee 2.18.3 and 4.4.0), `use_filesystem` is computed by an SQL expression that requires *all* of the following:
+In the MySQL study repositories (dcm4chee 2.18.3 and 4.4.0), `use_filesystem` is computed in SQL using:
 
-1. **Stability window checks**
+1. A **cutoff date** (`dicomarchive.filesystem_cutoff_date`) to force legacy studies to WADO.
+2. A persistent **dirty signal** (`HIP_dirty_study`) to force corrected/normalized studies to WADO.
 
-The row is considered filesystem-eligible only if:
+### Decision rules
 
-- `ABS(TIMESTAMPDIFF(SECOND, study.created_time, study.updated_time)) <= 600`
-- `ABS(TIMESTAMPDIFF(SECOND, series.created_time, series.updated_time)) <= 600`
-- `ABS(TIMESTAMPDIFF(SECOND, instance.created_time, instance.updated_time)) <= 600`
+Filesystem is eligible only when *all* of these are true:
 
-This is effectively a “stability window” heuristic: if an object’s `updated_time` diverges too much from its `created_time`, the object is treated as not stable enough to safely rely on a direct filesystem reference.
+- `settings.dicomarchive.filesystems` is configured (non-empty)
+- `study.created_time >= settings.dicomarchive.filesystem_cutoff_date`
+- The PACS database contains `HIP_dirty_study` and the study is **not** present in it
 
-2. **A valid file reference exists**
+Otherwise, `use_filesystem = false` and Sirius HIP prefers WADO.
 
-The repository requires a picked file reference (`file_ref` / `files_pick`) with:
+### Dirty table (`HIP_dirty_study`)
 
-- non-null `filepath`
-- non-null `filesystem_fk`
+`HIP_dirty_study` is a small table (keyed by `study_iuid`, i.e. Study Instance UID / `(0020,000D)`) that acts as a **sticky** indicator that a study must be served via WADO.
 
-If any of these are missing, `use_filesystem` is false.
+It is meant to be populated by the DB triggers shipped in the `scripts/mysql/*_dirty_triggers.sql` scripts at the time a study is corrected.
+
+- Once a study is dirty, later ingestion (e.g. adding a new series) does not erase the dirty signal.
+- Triggers are **AFTER UPDATE** only (no INSERT triggers): inserts from normal ingestion must not mark a study dirty.
+
+#### When triggers mark a study dirty
+
+Triggers insert/update `HIP_dirty_study` when they observe **meaningful metadata changes**, such as:
+
+- patient-level changes (patient is the top of the hierarchy: a patient change dirties all its studies)
+- changes to descriptions/identifiers (study/series/instance fields)
+- attribute-pointer changes (`*_attrs` in dcm4chee 2.18.3, `dicomattrs_fk` in dcm4chee 4.4.0)
+- patient reassignment (patient FK changes)
+
+#### When triggers do NOT mark a study dirty
+
+To avoid false positives during ingestion, the scripts intentionally ignore certain ingestion-time “housekeeping” UPDATEs (typically **NULL → value** transitions performed after INSERTs).
+
+- dcm4chee 2.18.3 ignores:
+  - `study.patient_fk`: NULL → non-NULL
+  - `study.accno_issuer_fk`: NULL → non-NULL
+  - `instance.retrieve_aets`: NULL → non-NULL
+- dcm4chee 4.4.0 ignores:
+  - `study.patient_fk`: NULL → non-NULL
+  - `instance.retrieve_aets`: NULL → non-NULL
+  - `instance.ext_retr_aet`: NULL → non-NULL
+
+Rationale: without these exceptions, normal ingestion would mark essentially every new study as dirty, and filesystem selection would never activate.
+
+Note: the same columns still mark dirty on real corrections (e.g. value → different value, or value → NULL).
+
+#### Operational behavior
+
+When filesystem selection is enabled, Sirius HIP expects the dirty-triggers to exist and will **fail fast at startup** if the required triggers are missing (instead of silently falling back to WADO). Run the appropriate script for your PACS version to create the table and triggers.
+
+
+## Configuration knobs
+
+- `settings.dicomarchive.filesystem_cutoff_date` (required when `settings.dicomarchive.filesystems` is configured)
+  - Interpreted as a **PACS local time** cutoff (MySQL `DATETIME`).
+  - Use a date-only value (e.g. `2026-03-01`) to mean **local midnight**.
+  - Do not include timezone suffixes like `Z` or offsets.
+  - Studies created before this cutoff are forced to WADO.
+  - Studies created on/after this cutoff can use filesystem when not marked dirty.
+- `HIP_dirty_study` table in the PACS DB
+  - Presence forces WADO for corrected/normalized studies.
+  - Expected to be maintained by the `scripts/mysql/*_dirty_triggers.sql` triggers when filesystem selection is enabled.
 
 ### Practical meaning
 
 - If `use_filesystem = true`, Sirius HIP can attempt `file://` access.
 - If `use_filesystem = false`, Sirius HIP prefers WADO.
 
-Note: `use_filesystem` is decided **per instance** (row), not per study.
+Note: even when filesystem is preferred, `/files/...` endpoints still *may* fall back to WADO if the filesystem read fails (file missing, mount not present, permissions). The selection logic only decides the **preferred** source.
 
-## How `/studyToken` uses this decision
-
-### Session-backed downloads (JWT OneTime)
-
-In `JwtAuthMethod::OneTime`, `/studyToken` creates a download session and persists one row per instance, including:
-
-- `use_wado = !use_filesystem`
-- filesystem reference only when `use_filesystem` is true
-
-Later, `/files/{session_id}/{file_index}` uses the persisted data to serve the file.
-
-### Stateless downloads (JWT Standard / None)
-
-When not in OneTime mode, `/studyToken` can create a **signed download token** for each instance, embedding the filesystem reference (only if present). Clients download via:
-
-- `/files/{token}`
-
-The `/files/{token}` handler tries filesystem first if the token contains a filesystem reference; otherwise it proxies WADO.
-
-### ZIP (`accessType=dicom.zip`)
-
-For ZIP responses, `/studyToken` builds a per-instance source list:
-
-- If `use_filesystem` is true and the filesystem path can be built: source is `file://<absolute path>`.
-- Otherwise: source is the PACS WADO URL.
-
-In OneTime mode, ZIP sources are derived from the persisted session file list to keep the output consistent with what will be downloadable.
-
-## How `/files` performs FS-first with WADO fallback
-
-Both download endpoints implement the same strategy:
-
-1. If a filesystem reference exists (`filesystem_fk` + `relative_file_path`):
-   - Build an absolute path using `settings.dicomarchive.get_fs_path_by_id(filesystem_fk)`.
-   - Try opening the file and stream it.
-2. If the file cannot be opened (missing, permissions, bad path, etc.):
-   - Build a WADO URL using `settings.dicomarchive.wadouri` + UIDs.
-   - Proxy the WADO response back to the client.
-
-This means the system remains functional even if:
-
-- file refs are stale,
-- the filesystem mount is temporarily unavailable,
-- or the archive has not finished moving files to the final location.
-
-## Configuration knobs
-
-- `settings.dicomarchive.wadouri`: PACS WADO-URI base URL.
-- `settings.dicomarchive.transfer_syntax`: transfer syntax used for WADO requests.
-- `settings.dicomarchive.filesystems`: list of filesystem roots; each has an `id` and a `path`.
-- (Implicit) the “stability window” constant is currently hardcoded in SQL as `600` seconds.
-
-## Known limitation / future improvement
-
-The current heuristic is based on `created_time` vs `updated_time` deltas and does not incorporate cross-entity comparisons (e.g. study vs series activity).
-
-A planned improvement (see TODO) is to make a *study-level* decision such as:
-
-- “Prefer WADO when `study.updated_time + WINDOW_TIME` is newer than the `updated_time` of any series in the study.”
-
-That approach can better capture “recent updates” at the study/series level, even when created/updated deltas do not.
+Note: `use_filesystem` is decided **per instance** (row), but the cutoff date and dirty signal are **study-level** rules.

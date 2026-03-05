@@ -1,8 +1,64 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+use chrono::{NaiveDate, NaiveDateTime};
 
 use crate::database::DBVersion;
 use crate::utils::{url_password_hidden, password_hidden};
+
+mod naive_datetime_opt_serde {
+    use super::*;
+    use serde::de::Error as _;
+
+    pub fn serialize<S>(value: &Option<NaiveDateTime>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match value {
+            None => serializer.serialize_none(),
+            Some(dt) => serializer.serialize_str(&dt.format("%Y-%m-%dT%H:%M:%S").to_string()),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<NaiveDateTime>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let opt = Option::<String>::deserialize(deserializer)?;
+        let Some(s) = opt else {
+            return Ok(None);
+        };
+
+        // IMPORTANT: interpreted as PACS *local* DATETIME cutoff.
+        // We intentionally do NOT accept timezone-bearing timestamps (RFC3339 with Z/+HH:MM)
+        // because PACS `study.created_time` is a MySQL DATETIME in local time.
+        // Requiring local/no-TZ formats avoids accidental UTC/local mismatches.
+        if s.contains('Z') || s.contains('+') {
+            return Err(D::Error::custom(
+                "dicomarchive.filesystem_cutoff_date must NOT include a timezone; use local datetime like 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'",
+            ));
+        }
+
+        // MySQL DATETIME-like.
+        if let Ok(dt) = NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S") {
+            return Ok(Some(dt));
+        }
+
+        // ISO8601-ish without timezone.
+        if let Ok(dt) = NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%S") {
+            return Ok(Some(dt));
+        }
+
+        // Date-only.
+        if let Ok(d) = NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
+            return Ok(Some(d.and_hms_opt(0, 0, 0).unwrap()));
+        }
+
+        Err(D::Error::custom(
+            "dicomarchive.filesystem_cutoff_date must be local time: 'YYYY-MM-DD' or 'YYYY-MM-DD[ T]HH:MM:SS' (no timezone)",
+        ))
+    }
+}
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -105,6 +161,13 @@ pub struct DicomArchive {
     pub wadouri: String,
     pub manifest_base_url: Option<String>,
     pub transfer_syntax: String,
+
+    /// Cutoff for enabling filesystem delivery.
+    ///
+    /// - Studies with `study.created_time` < cutoff are forced to WADO.
+    /// - Studies with `study.created_time` >= cutoff can use filesystem when not marked dirty.
+    #[serde(default, with = "naive_datetime_opt_serde")]
+    pub filesystem_cutoff_date: Option<NaiveDateTime>,
     pub stow:  Option<String>,
     pub qido: Option<String>,
     pub number_frames_field: Option<String>,
@@ -118,6 +181,12 @@ pub struct DicomArchive {
 
 impl Settings {
     pub fn validate(&self) -> anyhow::Result<()> {
+        // Filesystem delivery requires an explicit cutoff date to keep legacy studies on WADO.
+        if !self.dicomarchive.filesystems.is_empty() && self.dicomarchive.filesystem_cutoff_date.is_none() {
+            anyhow::bail!(
+                "dicomarchive.filesystem_cutoff_date must be set when dicomarchive.filesystems is configured"
+            );
+        }
         self.dicomarchive.validate_metadata_overrides()?;
         Ok(())
     }
@@ -216,8 +285,9 @@ mod tests {
         // Main sample config.
         let _ = parse_settings_from_file("sirius-hip.toml")?;
         // Dev configs.
-        let _ = parse_settings_from_file("sirius-hip.dev.toml")?;
-        let _ = parse_settings_from_file("sirius-hip.dev440.toml")?;
+        let _ = parse_settings_from_file("sirius-hip.dev.docker.toml")?;
+        let _ = parse_settings_from_file("sirius-hip.dev.ridi.preprod.toml")?;
+        let _ = parse_settings_from_file("sirius-hip.dev.ridi.testing.toml")?;
         Ok(())
     }
 
@@ -251,6 +321,7 @@ database_url = "mysql://pacs:pacs@opendicom_pacs_db:3306/pacsdb"
 database_max_connections = 40
 wadouri = "http://opendicom_pacs:8080/wado"
 transfer_syntax = "1.2.840.10008.1.2.1"
+filesystem_cutoff_date = "2026-03-01"
 filesystems = [{ id = 1, path = "/DICOM/archive" }]
 "#;
 

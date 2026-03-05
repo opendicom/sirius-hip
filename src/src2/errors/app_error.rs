@@ -49,6 +49,13 @@ pub enum AppError {
 
     // ---------- Internal ----------
 
+    #[error("missing filesystem reference for stable row (study={study_uid}, series={series_uid}, sop={sop_uid})")]
+    MissingFilesystemReference {
+        study_uid: String,
+        series_uid: String,
+        sop_uid: String,
+    },
+
     #[error("internal application error")]
     Internal(#[from] anyhow::Error),
 
@@ -59,9 +66,7 @@ pub enum AppError {
 
 
 use actix_web::{
-    HttpResponse,
-    ResponseError,
-    http::StatusCode,
+    App, HttpResponse, ResponseError, http::StatusCode
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -91,6 +96,7 @@ impl ResponseError for AppError {
             AppError::Database(_)
             // | AppError::Mongo(_)
             | AppError::Io(_)
+            | AppError::MissingFilesystemReference { .. }
             | AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -149,7 +155,10 @@ impl ResponseError for AppError {
             AppError::Database(_)
             | AppError::Io(_)
             | AppError::Internal(_)
-            | AppError::Pacs(_) => ("INTERNAL", "internal error".to_string()),
+            | AppError::Pacs(_) 
+            | AppError::MissingFilesystemReference { .. } => (
+                "INTERNAL", "internal error".to_string()
+            ),
         };
 
         HttpResponse::build(status)

@@ -3,6 +3,8 @@ use std::sync::Arc;
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
 
+use chrono::NaiveDateTime;
+
 use crate::settings::Settings;
 use crate::database::DBVersion;
 use crate::src2::errors::PacsError;
@@ -29,11 +31,11 @@ impl StudyRepositoryFactory {
 
         match archive.version {
             DBVersion::dcm4chee2183 => {
-                Self::create_2183(db_url, archive.database_max_connections).await
+                Self::create_2183(db_url, archive.database_max_connections, archive.filesystem_cutoff_date).await
             }
 
             DBVersion::dcm4chee440 => {
-                Self::create_440(db_url, archive.database_max_connections).await
+                Self::create_440(db_url, archive.database_max_connections, archive.filesystem_cutoff_date).await
             }
         }
     }
@@ -41,6 +43,7 @@ impl StudyRepositoryFactory {
     async fn create_2183(
         database_url: &str,
         max_connections: u32,
+        filesystem_cutoff_date: Option<NaiveDateTime>,
     ) -> Result<Arc<dyn StudyRepository>, PacsError> {
 
         if database_url.starts_with("mysql://") {
@@ -48,9 +51,8 @@ impl StudyRepositoryFactory {
                 .max_connections(max_connections)
                 .connect(database_url)
                 .await?;
-            let repo: Arc<dyn StudyRepository> = Arc::new(
-                Dcm4chee2183MySqlStudyRepository::new(pool),
-            );
+            let repo_impl = Dcm4chee2183MySqlStudyRepository::new(pool, filesystem_cutoff_date).await?;
+            let repo: Arc<dyn StudyRepository> = Arc::new(repo_impl);
             Ok(repo)
         } else if database_url.starts_with("postgres://") {
             let pool = PgPoolOptions::new()
@@ -69,6 +71,7 @@ impl StudyRepositoryFactory {
     async fn create_440(
         database_url: &str,
         max_connections: u32,
+        filesystem_cutoff_date: Option<NaiveDateTime>,
     ) -> Result<Arc<dyn StudyRepository>, PacsError> {
 
         if database_url.starts_with("mysql://") {
@@ -76,9 +79,8 @@ impl StudyRepositoryFactory {
                 .max_connections(max_connections)
                 .connect(database_url)
                 .await?;
-            let repo: Arc<dyn StudyRepository> = Arc::new(
-                Dcm4chee440MySqlStudyRepository::new(pool),
-            );
+            let repo_impl = Dcm4chee440MySqlStudyRepository::new(pool, filesystem_cutoff_date).await?;
+            let repo: Arc<dyn StudyRepository> = Arc::new(repo_impl);
             Ok(repo)
         } else if database_url.starts_with("postgres://") {
             let pool = PgPoolOptions::new()

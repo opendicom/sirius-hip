@@ -1,4 +1,4 @@
-![Header](doc/resources/logo.png)
+![Header](doc/resources/logo_horizontal.png)
 
 # Sirius HIP
 Health Integration Platform for multi-PACS environments
