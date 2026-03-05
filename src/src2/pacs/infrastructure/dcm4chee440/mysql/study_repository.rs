@@ -180,7 +180,10 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         } else {
             false
         };
-        let needs_patient_join = include_ohif_metadata || needs_patient_name_filter || needs_patient_id_filter_on_override;
+        // Optimization: join patient tables when filtering by patient_id (if no override)
+        // This allows the optimizer to use indexes directly instead of executing an EXISTS subquery.
+        let needs_patient_join_for_filter = query.patient_id.is_some() && patient_id_override.is_none();
+        let needs_patient_join = include_ohif_metadata || needs_patient_name_filter || needs_patient_id_filter_on_override || needs_patient_join_for_filter;
         let patient_name_select = override_or_default(
             overrides,
             "PatientName",
@@ -313,6 +316,15 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
                 qb.push(" LEFT JOIN `person_name` ON person_name.pk = patient.pat_name_fk");
             }
 
+            // Optimization: when filtering by patient_id, join patient_id table directly
+            // for better performance than EXISTS subquery.
+            if query.patient_id.is_some() && patient_id_override.is_none() {
+                qb.push(
+                    " INNER JOIN patient_id patient_id_filter
+                        ON patient_id_filter.patient_fk = patient.pk",
+                );
+            }
+
             // Avoid correlated subqueries in SELECT by joining the first patient_id row.
             // Only needed when rendering OHIF metadata and there is no PatientID override.
             if include_ohif_metadata && patient_id_override.is_none() {
@@ -370,8 +382,12 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         if let Some(patient_id) = query.patient_id {
             if let Some(col) = override_col(overrides, "PatientID") {
                 qb.push(" AND ").push(col).push(" = ").push_bind(patient_id);
+            } else if needs_patient_join {
+                // Patient tables are joined, use direct filter with patient_id table for optimal performance
+                qb.push(" AND patient_id_filter.pat_id = ").push_bind(patient_id);
             } else {
-                // Avoid joining `patient` just to filter on patient_id.
+                // Fallback: should not reach here due to needs_patient_join_for_filter,
+                // but kept for safety if logic changes.
                 qb.push(" AND EXISTS (SELECT 1 FROM patient_id pid WHERE pid.patient_fk = study.patient_fk AND pid.pat_id = ")
                     .push_bind(patient_id)
                     .push(")");

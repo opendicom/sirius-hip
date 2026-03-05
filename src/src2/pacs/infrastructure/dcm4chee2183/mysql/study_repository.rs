@@ -159,9 +159,13 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         } else {
             false
         };
+        // Optimization: join patient table when filtering by patient_id (if no override or override references patient)
+        // This allows the optimizer to use indexes directly instead of executing a subquery.
+        let needs_patient_join_for_filter = query.patient_id.is_some() && patient_id_override.is_none();
         let needs_patient_join = include_ohif_metadata
             || needs_patient_name_filter
             || needs_patient_id_filter_on_override
+            || needs_patient_join_for_filter
             || matches!(patient_name_override.as_deref(), Some(c) if c.starts_with("patient."));
         let patient_name_expr = override_or_default(overrides, "PatientName", "patient.pat_name");
         let patient_id_expr = override_or_default(overrides, "PatientID", "patient.pat_id");
@@ -327,6 +331,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         // Patient filters
         if let Some(patient_id) = query.patient_id {
             if needs_patient_join {
+                // Patient table is joined, use direct filter for optimal performance
                 let patient_id_where = override_or_default(overrides, "PatientID", "patient.pat_id");
                 qb.push(" AND ")
                     .push(patient_id_where)
@@ -337,7 +342,8 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                 // (Typical overrides reference `study.*` or `patient.*`; patient.* forces join via `needs_patient_join`.)
                 qb.push(" AND ").push(col).push(" = ").push_bind(patient_id);
             } else {
-                // Avoid joining `patient` just to filter by patient_id.
+                // Fallback: should not reach here due to needs_patient_join_for_filter,
+                // but kept for safety if logic changes.
                 qb.push(" AND study.patient_fk IN (SELECT p.pk FROM patient p WHERE p.pat_id = ");
                 qb.push_bind(patient_id).push(")");
             }
