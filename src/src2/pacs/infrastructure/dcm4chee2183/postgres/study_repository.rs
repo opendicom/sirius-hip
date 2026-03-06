@@ -6,7 +6,7 @@ use crate::src2::pacs::read_models::QidoStudyRow;
 use crate::src2::pacs::read_models::StudyTokenRow;
 use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::repositories::study_repository::{
-    QidoStudiesIncludeFields, QidoStudiesQuery, StudyTokenQuery,
+    QidoStudiesIncludeFields, QidoStudiesSearchCriteria, StudyTokenSearchCriteria,
 };
 
 pub struct Dcm4chee2183PostgresStudyRepository {
@@ -23,17 +23,17 @@ impl Dcm4chee2183PostgresStudyRepository {
 impl StudyRepository for Dcm4chee2183PostgresStudyRepository {
     async fn fetch_study_token_rows(
         &self,
-        query: StudyTokenQuery<'_>,
+        criteria: StudyTokenSearchCriteria<'_>,
         include_filesystem: bool,
         include_ohif_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError> {
-        let _ = (query, include_filesystem, include_ohif_metadata);
+        let _ = (criteria, include_filesystem, include_ohif_metadata);
         Err(PacsError::UnsupportedDatabase("postgres".to_string()))
     }
 
     async fn fetch_qido_studies_rows(
         &self,
-        _query: QidoStudiesQuery<'_>,
+        _criteria: QidoStudiesSearchCriteria<'_>,
         _include: QidoStudiesIncludeFields,
     ) -> Result<Vec<QidoStudyRow>, PacsError> {
         Err(PacsError::UnsupportedDatabase("postgres".to_string()))

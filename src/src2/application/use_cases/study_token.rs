@@ -14,7 +14,7 @@ use crate::api::study_token::params::StudyTokenParams;
 use crate::auth::{self, AuthClaims};
 use crate::settings::{JwtAuthMethod, Settings};
 use crate::src2::errors::app_error::AppError;
-use crate::src2::pacs::repositories::study_repository::{StudyRepository, StudyTokenQuery};
+use crate::src2::pacs::repositories::study_repository::{StudyRepository, StudyTokenSearchCriteria};
 use crate::src2::application::models::{
     download_session::DownloadSession,
     download_session_file::DownloadSessionFile,
@@ -789,12 +789,13 @@ pub async fn execute_study_token(
         }
 
         // --------------------------------------------------------------
-        // 2. BUILD DATABASE QUERY PARAMETERS FROM REQUEST
+        // 2. BUILD REPOSITORY SEARCH CRITERIA FROM REQUEST PARAMETERS
         // --------------------------------------------------------------
+
         // Separate search and control parameters
         // `token`` and `accessType are not part of search query
         // --------------------------------------------------------------
-        let query = StudyTokenQuery {
+        let criteria = StudyTokenSearchCriteria {
             metadata_overrides: settings.dicomarchive.metadata_overrides.as_deref(),
             institution: params.institution.as_deref(),
             // If the client doesn't provide `max`, cap results using settings.
@@ -844,7 +845,7 @@ pub async fn execute_study_token(
 
         let rows = study_repo
             .fetch_study_token_rows(
-                query,
+                criteria,
                 include_filesystem,
                 // Request extra OHIF metadata (patient/study/series/instance + inst_attrs).
                 include_ohif_metadata,

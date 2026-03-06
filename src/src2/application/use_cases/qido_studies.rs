@@ -16,7 +16,7 @@ use crate::src2::application::repositories::DownloadSessionRepository;
 use crate::src2::errors::app_error::AppError;
 use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::repositories::study_repository::{
-    QidoStudiesIncludeFields, QidoStudiesQuery,
+    QidoStudiesIncludeFields, QidoStudiesSearchCriteria,
 };
 
 fn to_dicom_date(date: &str) -> String {
@@ -88,10 +88,10 @@ pub async fn execute_qido_studies(
     let limit = params.limit.unwrap_or(settings.max_default);
 
     // --------------------------------------------------------------
-    // 3. BUILD REPOSITORY QUERY
+    // 3. BUILD REPOSITORY SEARCH CRITERIA FROM REQUEST PARAMETERS
     // --------------------------------------------------------------
 
-    let repo_query = QidoStudiesQuery {
+    let criteria = QidoStudiesSearchCriteria {
         metadata_overrides: settings.dicomarchive.metadata_overrides.as_deref(),
         patient_id: params.patient_id.as_deref(),
         patient_name: params.patient_name.as_deref(),
@@ -110,7 +110,7 @@ pub async fn execute_qido_studies(
     // 4. FETCH STUDY ROWS FROM REPOSITORY
     // --------------------------------------------------------------
     let rows = study_repo
-        .fetch_qido_studies_rows(repo_query, include)
+        .fetch_qido_studies_rows(criteria, include)
         .await
         .map_err(AppError::Pacs)?;
 

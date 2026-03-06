@@ -28,7 +28,7 @@ pub trait StudyRepository: Send + Sync {
     /// is selected.
     async fn fetch_study_token_rows(
         &self,
-        query: StudyTokenQuery<'_>,
+        criteria: StudyTokenSearchCriteria<'_>,
         include_filesystem: bool,
         include_ohif_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError>;
@@ -38,7 +38,7 @@ pub trait StudyRepository: Send + Sync {
     /// This must return one row per study (so `limit`/`offset` match QIDO semantics).
     async fn fetch_qido_studies_rows(
         &self,
-        query: QidoStudiesQuery<'_>,
+        criteria: QidoStudiesSearchCriteria<'_>,
         include: QidoStudiesIncludeFields,
     ) -> Result<Vec<QidoStudyRow>, PacsError>;
 }
@@ -46,12 +46,14 @@ pub trait StudyRepository: Send + Sync {
 
 
 // ===================================================
-// StudyRepository Query Parameters Definition
+// StudyRepository Search Criteria Definitions
 // ===================================================
 
 
-/// Query parameters for flexible study search (DICOM and business logic fields)
-pub struct StudyTokenQuery<'a> {
+/// Study token search criteria for `fetch_study_token_rows`. 
+/// This struct defines a comprehensive set of optional filters that can be applied at various levels of the DICOM hierarchy (patient, study, series).
+/// The repository implementation is expected to interpret these criteria and construct an appropriate query against the underlying data store.
+pub struct StudyTokenSearchCriteria<'a> {
     /// Optional list of metadata overrides.
     ///
     /// Each override describes:
@@ -136,10 +138,12 @@ pub struct StudyTokenQuery<'a> {
 
 
 // ===================================================
-// QIDO /studies Query Parameters Definition
+// QIDO /studies Search Criteria Definition
 // ===================================================
 
-pub struct QidoStudiesQuery<'a> {
+/// Search criteria for QIDO-RS `/studies` endpoint. 
+/// This struct defines the optional query parameters that can be used to filter studies in a QIDO-compliant manner.
+pub struct QidoStudiesSearchCriteria<'a> {
     /// Optional list of metadata overrides.
     ///
     /// Each override describes:

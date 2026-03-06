@@ -8,7 +8,7 @@ use crate::src2::pacs::read_models::StudyTokenRow;
 use crate::src2::pacs::infrastructure::mysql_sql_helpers::{override_col, override_or_default};
 use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::repositories::study_repository::{
-    QidoStudiesIncludeFields, QidoStudiesQuery, StudyTokenQuery,
+    QidoStudiesIncludeFields, QidoStudiesSearchCriteria, StudyTokenSearchCriteria,
 };
 
 pub struct Dcm4chee2183MySqlStudyRepository {
@@ -132,7 +132,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
 
     async fn fetch_study_token_rows(
         &self,
-        query: StudyTokenQuery<'_>,
+        criteria: StudyTokenSearchCriteria<'_>,
         include_filesystem: bool,
         include_ohif_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError> {
@@ -142,7 +142,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // Common case optimisation: /studyToken frequently targets a single study.
-        let study_uid_values = query.study_instance_uid.map(split_backslash);
+        let study_uid_values = criteria.study_instance_uid.map(split_backslash);
 
         // Filesystem/WADO selection (cutoff date):
         // - Before cutoff: always WADO.
@@ -150,18 +150,18 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
 
         let mut qb = QueryBuilder::<MySql>::new("SELECT ");
 
-        let overrides = query.metadata_overrides;
+        let overrides = criteria.metadata_overrides;
         let patient_id_override = override_col(overrides, "PatientID");
         let patient_name_override = override_col(overrides, "PatientName");
-        let needs_patient_name_filter = query.patient_fullname.is_some();
-        let needs_patient_id_filter_on_override = if query.patient_id.is_some() {
+        let needs_patient_name_filter = criteria.patient_fullname.is_some();
+        let needs_patient_id_filter_on_override = if criteria.patient_id.is_some() {
             matches!(patient_id_override.as_deref(), Some(c) if c.starts_with("patient."))
         } else {
             false
         };
         // Optimization: join patient table when filtering by patient_id (if no override or override references patient)
         // This allows the optimizer to use indexes directly instead of executing a subquery.
-        let needs_patient_join_for_filter = query.patient_id.is_some() && patient_id_override.is_none();
+        let needs_patient_join_for_filter = criteria.patient_id.is_some() && patient_id_override.is_none();
         let needs_patient_join = include_ohif_metadata
             || needs_patient_name_filter
             || needs_patient_id_filter_on_override
@@ -324,12 +324,12 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         // ------------------------------------------------------------
 
         // Institution filter
-        if let Some(institution) = query.institution {
+        if let Some(institution) = criteria.institution {
             qb.push(" AND series.institution = ").push_bind(institution);
         }
 
         // Patient filters
-        if let Some(patient_id) = query.patient_id {
+        if let Some(patient_id) = criteria.patient_id {
             if needs_patient_join {
                 // Patient table is joined, use direct filter for optimal performance
                 let patient_id_where = override_or_default(overrides, "PatientID", "patient.pat_id");
@@ -348,7 +348,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                 qb.push_bind(patient_id).push(")");
             }
         }
-        if let Some(patient_regex) = query.patient_fullname {
+        if let Some(patient_regex) = criteria.patient_fullname {
             // NOTE: columns are VARCHAR(..) BINARY, so matching is case-sensitive.
             let patient_name_where = override_or_default(overrides, "PatientName", "patient.pat_name");
             qb.push(" AND ")
@@ -375,19 +375,19 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // Accession number
-        if let Some(accession) = query.accession_number {
+        if let Some(accession) = criteria.accession_number {
             qb.push(" AND study.accession_no = ").push_bind(accession);
         }
 
         // Study ID (LIKE)
-        if let Some(study_id) = query.study_id {
+        if let Some(study_id) = criteria.study_id {
             qb.push(" AND study.study_id LIKE ").push_bind(format!("%{}%", study_id));
         }
 
         // Study date filter for dcm4chee 2.18.3
         // `study.study_datetime` is a DATETIME, so avoid wrapping it in DATE(...)
         // to keep predicates sargable (i.e. allow index usage).
-        if let Some(study_date) = query.study_date {
+        if let Some(study_date) = criteria.study_date {
             let parts = study_date.split('|').collect::<Vec<_>>();
             match parts.as_slice() {
                 // "YYYY-MM-DD" (no pipe present)
@@ -423,7 +423,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // ModalityInStudy (study.mods_in_study contains values separated by '\')
-        if let Some(mod_in_study) = query.modality_in_study {
+        if let Some(mod_in_study) = criteria.modality_in_study {
             // Delimiter-safe contains check without LIKE/backslash-escape issues.
             // Use CHAR(92) ("\\") to avoid any dependence on NO_BACKSLASH_ESCAPES.
             qb.push(" AND INSTR(CONCAT(CHAR(92), study.mods_in_study, CHAR(92)), CONCAT(CHAR(92), ")
@@ -432,7 +432,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // CUIDsInStudy (study.cuids_in_study contains values separated by '\')
-        if let Some(cuids) = query.cuids_in_study {
+        if let Some(cuids) = criteria.cuids_in_study {
             let values = split_backslash(cuids);
             if !values.is_empty() {
                 qb.push(" AND (");
@@ -448,7 +448,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // Series filters
-        if let Some(series_uids) = query.series_instance_uid {
+        if let Some(series_uids) = criteria.series_instance_uid {
             let values = split_backslash(series_uids);
             if !values.is_empty() {
                 qb.push(" AND series.series_iuid IN (");
@@ -459,17 +459,17 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                 separated.push_unseparated(")");
             }
         }
-        if let Some(series_number) = query.series_number {
+        if let Some(series_number) = criteria.series_number {
             qb.push(" AND series.series_no = ").push_bind(series_number);
         }
-        if let Some(series_desc) = query.series_description {
+        if let Some(series_desc) = criteria.series_description {
             qb.push(" AND series.series_desc LIKE ")
                 .push_bind(format!("%{}%", series_desc));
         }
-        if let Some(modality) = query.modality {
+        if let Some(modality) = criteria.modality {
             qb.push(" AND series.modality = ").push_bind(modality);
         }
-        if let Some(modality_off) = query.modality_off {
+        if let Some(modality_off) = criteria.modality_off {
             let values = split_backslash(modality_off);
             if !values.is_empty() {
                 qb.push(" AND series.modality NOT IN (");
@@ -482,10 +482,10 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         }
 
         // Instance/SOP class filters
-        if let Some(sop_class) = query.sop_class {
+        if let Some(sop_class) = criteria.sop_class {
             qb.push(" AND instance.sop_cuid = ").push_bind(sop_class);
         }
-        if let Some(sop_off) = query.sop_class_off {
+        if let Some(sop_off) = criteria.sop_class_off {
             let values = split_backslash(sop_off);
             if values.len() <= 1 {
                 if let Some(v) = values.first() {
@@ -504,7 +504,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         // Ordering/limit.
         // Use numeric PKs to avoid expensive CAST() on instance numbers and reduce sort CPU.
         qb.push(" ORDER BY study.pk ASC, series.pk ASC, instance.pk ASC");
-        if let Some(max) = query.max {
+        if let Some(max) = criteria.max {
             qb.push(" LIMIT ").push_bind(max as u64);
         }
 
@@ -518,7 +518,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
 
     async fn fetch_qido_studies_rows(
         &self,
-        query: QidoStudiesQuery<'_>,
+        criteria: QidoStudiesSearchCriteria<'_>,
         include: QidoStudiesIncludeFields,
     ) -> Result<Vec<QidoStudyRow>, PacsError> {
         fn split_backslash(value: &str) -> Vec<&str> {
@@ -556,7 +556,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             Some(format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]))
         }
 
-        let overrides = query.metadata_overrides;
+        let overrides = criteria.metadata_overrides;
         let pat_name_expr = override_or_default(overrides, "PatientName", "patient.pat_name");
         let pat_id_expr = override_or_default(overrides, "PatientID", "patient.pat_id");
         let pat_birthdate_expr = override_or_default(
@@ -625,7 +625,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         // Apply pagination at the study level first, then join back to fetch full row fields.
         qb.push(" FROM (SELECT study.pk AS pk FROM study INNER JOIN patient ON patient.pk = study.patient_fk WHERE 1=1");
 
-        if let Some(value) = query.patient_id {
+        if let Some(value) = criteria.patient_id {
             let patient_id_where = override_or_default(overrides, "PatientID", "patient.pat_id");
             if has_wildcards(value) {
                 qb.push(" AND ")
@@ -641,7 +641,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        if let Some(value) = query.patient_name {
+        if let Some(value) = criteria.patient_name {
             let patient_name_where = override_or_default(overrides, "PatientName", "patient.pat_name");
             if has_wildcards(value) {
                 qb.push(" AND ")
@@ -657,7 +657,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        if let Some(value) = query.referring_physician_name {
+        if let Some(value) = criteria.referring_physician_name {
             let ref_phys_where = override_or_default(overrides, "ReferringPhysicianName", "study.ref_physician");
             if has_wildcards(value) {
                 qb.push(" AND ")
@@ -673,7 +673,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        if let Some(value) = query.accession_no {
+        if let Some(value) = criteria.accession_no {
             let accession_where = override_or_default(overrides, "AccessionNumber", "study.accession_no");
             if has_wildcards(value) {
                 qb.push(" AND ")
@@ -689,7 +689,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        if let Some(value) = query.modalities_in_study {
+        if let Some(value) = criteria.modalities_in_study {
             let modalities_where = override_or_default(overrides, "ModalitiesInStudy", "study.mods_in_study");
             // `study.mods_in_study` is a backslash-separated list. QIDO matching applies to an item,
             // so we search within `\\<item>\\` boundaries using LIKE and DICOM wildcards.
@@ -710,7 +710,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        if let Some(value) = query.study_id {
+        if let Some(value) = criteria.study_id {
             if has_wildcards(value) {
                 qb.push(" AND study.study_id LIKE ")
                     .push_bind(to_mysql_like_pattern(value))
@@ -720,7 +720,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        if let Some(value) = query.study_iuid {
+        if let Some(value) = criteria.study_iuid {
             let values: Vec<String> = split_backslash(value).into_iter().map(|s| s.to_string()).collect();
             if !values.is_empty() {
                 if values.len() == 1 {
@@ -740,7 +740,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         // Study date: QIDO uses DICOM date range syntax (YYYYMMDD-YYYYMMDD).
         // We also accept ISO-like date strings by extracting digits.
         // As above, keep predicates sargable by avoiding DATE(study.study_datetime).
-        if let Some(value) = query.study_date {
+        if let Some(value) = criteria.study_date {
             let raw = value.trim();
             if raw.starts_with('-') {
                 let end = to_dicom_date_digits(raw.trim_start_matches('-'));
@@ -794,7 +794,7 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        if let Some(value) = query.study_time {
+        if let Some(value) = criteria.study_time {
             let t = to_dicom_date_digits(value);
             if t.len() >= 4 {
                 let iso = if t.len() >= 6 {
@@ -806,8 +806,8 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
             }
         }
 
-        qb.push(" ORDER BY study.study_iuid ASC LIMIT ").push_bind(query.limit);
-        if let Some(offset) = query.offset {
+        qb.push(" ORDER BY study.study_iuid ASC LIMIT ").push_bind(criteria.limit);
+        if let Some(offset) = criteria.offset {
             qb.push(" OFFSET ").push_bind(offset);
         }
 
