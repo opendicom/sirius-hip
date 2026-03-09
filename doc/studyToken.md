@@ -9,14 +9,14 @@ This document describes the current `/studyToken` implementation in the **src2**
 Resolves a study query and returns a viewer-specific payload (JSON, XML, or ZIP stream) depending on `accessType`.
 
 - Handler: `src/src2/api/study_token_handler.rs`
-- Service: `src/src2/application/services/study_token_service.rs`
+- Use case: `src/src2/application/use_cases/study_token.rs`
 
 #### Query parameters
 
 The request is parsed using `StudyTokenParams`:
 
 - Operation-level:
-  - `token`: optional JWT token (query parameter fallback). When `settings.jwt_auth` is `standard` or `onetime`, a valid JWT is required and should be provided via `Authorization: Bearer <token>`.
+  - `token`: required JWT token. Preferred via `Authorization: Bearer <token>`, with a querystring fallback `?token=...`.
   - `session`: optional, passed through to some viewer outputs
   - `institution`: optional tenant filter
   - `proxyURI`: optional base URL used to build absolute download URLs
@@ -24,7 +24,6 @@ The request is parsed using `StudyTokenParams`:
     - `ohif`
     - `weasis.xml`
     - `dicom.zip`
-    - `cornerstone.json`
   - `max`: optional limit (defaults to `settings.max_default` when missing/0)
 
 - Patient-level:
@@ -50,21 +49,16 @@ The request is parsed using `StudyTokenParams`:
 
 ## Auth modes and URL strategy
 
-`settings.jwt_auth` controls how downloads are exposed:
+`settings.jwt_auth` controls the enforcement level:
 
-### 1) `none`
-
-- No JWT validation is performed.
-- Viewer payloads that require per-instance URLs use **stateless signed download tokens**:
-  - `GET /files/{token}`
-
-### 2) `standard`
+### 1) `standard`
 
 - A valid JWT is required and validated (see Token transport).
-- Download URLs still use **stateless signed download tokens**:
-  - `GET /files/{token}`
+- `/studyToken` creates a **download session** in the *application DB*.
+- Viewer payloads use **session-backed** URLs:
+  - `GET /files/{session_id}/{file_index}`
 
-### 3) `onetime`
+### 2) `onetime`
 
 - A valid JWT is required and validated (see Token transport).
 - `/studyToken` creates a **download session** in the *application DB*.
@@ -84,19 +78,9 @@ The key design requirement is that **generated URLs always hit an application en
 
 Performance note: `/studyToken` rendering performs **no filesystem I/O**. It only uses the PACS database rows (`inst_attrs` and other columns). If some DICOM tags are missing from those blobs, the corresponding fields in the viewer payload are left null/empty.
 
-> Note: `settings.jwt_auth` is deserialized with `lowercase` names, so valid values in config are `none`, `standard`, `onetime`.
+> Note: `settings.jwt_auth` is deserialized with `lowercase` names, so valid values in config are `standard`, `onetime`.
 
 ## Download endpoints (byte serving)
-
-### `GET /files/{token}` (stateless)
-
-- Handler: `src/src2/api/files_handler.rs` (`download_token_handler`)
-- The token contains:
-  - Study/Series/SOP UIDs
-  - Optional filesystem reference: `(filesystem_fk, relative_file_path)`
-- Resolution logic:
-  1. If filesystem reference is present, attempt to open and stream the file from disk.
-  2. If missing or file open fails, proxy bytes from WADO-URI using a pooled `reqwest::Client`.
 
 ### `GET /files/{session_id}/{file_index}` (session-backed)
 
@@ -104,10 +88,10 @@ Performance note: `/studyToken` rendering performs **no filesystem I/O**. It onl
 - In `onetime` mode:
   - First performs an **atomic claim** (`claim_file(session_id, file_index)`).
   - If the file has already been claimed, the request fails (download-once semantics).
-- In `standard/none` mode:
-  - Fetches the file metadata without claiming (proxy-only behavior).
+- In `standard` mode:
+  - Fetches the file metadata without claiming; repeated downloads are allowed until expiration.
 
-Resolution logic is the same as stateless:
+Resolution logic:
 
 1. Attempt filesystem open if `(filesystem_fk, relative_file_path)` exists.
 2. Otherwise (or if missing), proxy WADO-URI.
@@ -124,6 +108,7 @@ Created at startup by the MySQL repository:
   - `session_id` (PK)
   - `expires_at`
   - `total_files`
+  - `token_hash` (SHA-256 of the JWT that created the session)
   - `created_at`
 
 - `HIP_download_session_files`
@@ -180,13 +165,14 @@ If the filesystem reference is missing or the file cannot be opened, the server 
 
 ## Example requests
 
-### OHIF manifest (Standard/None)
+### OHIF manifest (Standard)
 
 ```bash
 curl -G "http://localhost:5001/studyToken" \
   --data-urlencode "accessType=ohif" \
   --data-urlencode "PatientID=123" \
-  --data-urlencode "max=200"
+  --data-urlencode "max=200" \
+  -H "Authorization: Bearer ..."
 ```
 
 ### OHIF manifest (OneTime)
@@ -201,7 +187,7 @@ curl -G "http://localhost:5001/studyToken" \
 The response will contain URLs of the form:
 
 - `.../files/{session_id}/{file_index}` (OneTime)
-- `.../files/{token}` (Standard/None)
+- `.../files/{session_id}/{file_index}` (Standard)
 
 ## Operational notes / caveats
 

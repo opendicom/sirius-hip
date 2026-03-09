@@ -263,8 +263,6 @@ http://pacs/wado
 ## URL builder (Docker nginx): `/urlbuilder/study-token.html`
 
 Construct manifest or dicom zip file to download or view dicom studies in diferents viewers:
-
-- [cornerstone](https://cornerstonejs.org/)
 - [ohif](https://viewer.ohif.org/)
 - [weasis](https://weasis.org/en/index.html)
 
@@ -272,7 +270,7 @@ Construct manifest or dicom zip file to download or view dicom studies in difere
 
 | name                | type  | required              | description                                                  |
 | ------------------- | ----- | --------------------- | ------------------------------------------------------------ |
-| `accessType`        | query | required              | Type of response. Either a manifest to view dicom images from different viewers or a compressed file with the dicom images.</p>*Available values* : <br /><ul><li>cornerstone.json</li><li>weasis.xml</li><li>dicom.zip</li><li>ohif</li></ul> |
+| `accessType`        | query | required              | Type of response. Either a manifest to view dicom images from different viewers or a compressed file with the dicom images.</p>*Available values* : <br /><ul><li>weasis.xml</li><li>dicom.zip</li><li>ohif</li></ul> |
 | `token`             | query | optional/required[^1] | Token for external sofware interoperability.<br />If Sirius HIP is configured to use *JWT Authorization*, a valid JWT must be provided on requests.<br /><br />**Preferred:** send it as HTTP header: <br /><code>Authorization: Bearer &lt;token&gt;</code><br /><br />**Compatibility fallback:** send it as query parameter: <code>token=...</code><br /><br />External entity must build this token as folow:<br />`{ "aud": "sirius-hip", "exp": TIMESTAMP }`<br /><br />- **Algorithm:** Same as Sirius HIP configuration<br />- **Secret key:** Same as Sirius HIP configuration |
 | `session`           | query | optional              | Session token used for external sofware interoperability.<br />External entity session validation. This parameter is added in every response. So the calling entity can validate the session handed by it |
 | `proxyURI`          | query | optional              | If configured, use this url as the base url for downloading the images from the manifest. Otherwise, use the Sirius HIP base URL |

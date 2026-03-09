@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-use serde_json::json;
 use sqlx::MySqlPool;
 use async_trait::async_trait;
 use anyhow::Context;
+use sha2::{Digest, Sha256};
 use dicom_encoding::TransferSyntaxIndex;
 use dicom_object::InMemDicomObject;
 use dicom_transfer_syntax_registry::TransferSyntaxRegistry;
@@ -31,7 +31,6 @@ pub enum AccessType {
     Zip,
     Weasis,
     Ohif,
-    Cornerstone,
 }
 
 impl AccessType {
@@ -40,7 +39,6 @@ impl AccessType {
             "dicom.zip" => Some(AccessType::Zip),
             "weasis.xml" => Some(AccessType::Weasis),
             "ohif" => Some(AccessType::Ohif),
-            "cornerstone.json" => Some(AccessType::Cornerstone),
             _ => None,
         }
     }
@@ -87,9 +85,7 @@ struct StudyTokenPlan {
     params: StudyTokenParams,
     access_type: AccessType,
     rows: Vec<crate::src2::pacs::read_models::StudyTokenRow>,
-    total_files: u32,
     session_id: Option<String>,
-    expires_at: Option<DateTime<Utc>>,
     base_url: String,
     // Retrieval URLs intended for viewer-style clients.
     // - In OneTime mode: local /files/{session}/{index} URLs (enforced)
@@ -125,8 +121,9 @@ trait StudyTokenPresenter {
 struct OhifPresenter {
     settings: Arc<Settings>,
 }
-struct CornerstonePresenter;
-struct WeasisPresenter;
+struct WeasisPresenter {
+    settings: Arc<Settings>,
+}
 struct ZipPresenter;
 
 
@@ -602,58 +599,198 @@ impl StudyTokenPresenter for OhifPresenter {
 
 
 // -------------------------------------------------------------------------------- //
-// CORNERSTONE -  StudyTokenPresenter implementation
-// -------------------------------------------------------------------------------- //
-#[async_trait(?Send)]
-impl StudyTokenPresenter for CornerstonePresenter {
-    async fn render(&self, plan: StudyTokenPlan) -> Result<StudyTokenOutput, AppError> {
-        Ok(StudyTokenOutput::Json(json!({
-            "accessType": "cornerstone.json",
-            "sessionId": plan.session_id,
-            "expiresAt": plan.expires_at.map(|d| d.to_rfc3339()),
-            "totalFiles": plan.total_files,
-            "urls": plan.retrieve_urls,
-        })))
-    }
-}
-
-
-// -------------------------------------------------------------------------------- //
 // WEASIS - StudyTokenPresenter implementation
 // -------------------------------------------------------------------------------- //
 #[async_trait(?Send)]
 impl StudyTokenPresenter for WeasisPresenter {
     async fn render(&self, plan: StudyTokenPlan) -> Result<StudyTokenOutput, AppError> {
-        // Minimal XML payload (easy to evolve).
-        // If you have a strict Weasis schema, replace this with a dedicated builder.
-        let mut xml = String::new();
-        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str("<weasisManifest>");
-        if let Some(session_id) = &plan.session_id {
-            xml.push_str("<sessionId>");
-            xml.push_str(session_id);
-            xml.push_str("</sessionId>");
-        }
-        xml.push_str("<totalFiles>");
-        xml.push_str(&plan.total_files.to_string());
-        xml.push_str("</totalFiles>");
-        xml.push_str("<files>");
-        fn escape_xml_attr(value: &str) -> String {
-            value
-                .replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;")
-                .replace('"', "&quot;")
-                .replace('\'', "&apos;")
+        fn push_attr(xml: &mut String, name: &str, value: &str) {
+            xml.push(' ');
+            xml.push_str(name);
+            xml.push_str("=\"");
+            for ch in value.chars() {
+                match ch {
+                    '&' => xml.push_str("&amp;"),
+                    '<' => xml.push_str("&lt;"),
+                    '>' => xml.push_str("&gt;"),
+                    '"' => xml.push_str("&quot;"),
+                    '\'' => xml.push_str("&apos;"),
+                    _ => xml.push(ch),
+                }
+            }
+            xml.push('"');
         }
 
-        for url in &plan.retrieve_urls {
-            xml.push_str("<file url=\"");
-            xml.push_str(&escape_xml_attr(url));
-            xml.push_str("\" />");
+        fn normalize_dicom_date(value: &str) -> std::borrow::Cow<'_, str> {
+            if value.as_bytes().contains(&b'-') {
+                let mut out = String::with_capacity(value.len());
+                for ch in value.chars() {
+                    if ch != '-' {
+                        out.push(ch);
+                    }
+                }
+                std::borrow::Cow::Owned(out)
+            } else {
+                std::borrow::Cow::Borrowed(value)
+            }
         }
-        xml.push_str("</files>");
-        xml.push_str("</weasisManifest>");
+
+        let mut xml = String::with_capacity(512 + plan.rows.len() * 160);
+        xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" ?>"#);
+        xml.push_str(r#"<manifest xmlns="http://www.weasis.org/xsd/2.5" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">"#);
+
+        xml.push_str("<arcQuery");
+
+        // Common URL parameters for all authentication methods.
+        // We always pass `session` for Weasis so the /wado endpoint can resolve
+        // filesystem vs WADO source without touching PACS DB per-instance.
+        let session = plan.session_id.as_deref().unwrap_or("");
+        let ts = self.settings.dicomarchive.transfer_syntax.as_str();
+        match self.settings.jwt_auth {
+            JwtAuthMethod::Standard => {
+                let token = plan.params.token.as_deref().unwrap_or("");
+                push_attr(
+                    &mut xml,
+                    "additionnalParameters",
+                    &format!("&transferSyntax={ts}&session={session}&token={token}"),
+                );
+            }
+
+            JwtAuthMethod::OneTime => {
+                let token = plan.params.token.as_deref().unwrap_or("");
+                push_attr(
+                    &mut xml,
+                    "additionnalParameters",
+                    &format!("&transferSyntax={ts}&session={session}&token={token}"),
+                );
+            }
+        }
+        push_attr(&mut xml, "arcId", "");
+        push_attr(&mut xml, "baseUrl", &format!("{}/wado", plan.base_url));
+        push_attr(&mut xml, "requireOnlySOPInstanceUID", "false");
+        xml.push('>');
+
+        let mut current_patient_id: Option<&str> = None;
+        let mut current_patient_name: Option<&str> = None;
+        let mut current_patient_sex: Option<&str> = None;
+        let mut current_study_uid: Option<&str> = None;
+        let mut current_series_uid: Option<&str> = None;
+
+        let mut patient_open = false;
+        let mut study_open = false;
+        let mut series_open = false;
+
+        for row in &plan.rows {
+            let patient_id = row.patient_id.as_deref().unwrap_or("");
+            let patient_name = row.patient_name.as_deref().unwrap_or("");
+            let patient_sex = row.patient_sex.as_deref().unwrap_or("");
+            let study_uid = row.study_instance_uid.as_str();
+            let series_uid = row.series_instance_uid.as_str();
+
+            let patient_changed = current_patient_id != Some(patient_id)
+                || current_patient_name != Some(patient_name)
+                || current_patient_sex != Some(patient_sex);
+            let study_changed = patient_changed || current_study_uid != Some(study_uid);
+            let series_changed = study_changed || current_series_uid != Some(series_uid);
+
+            if series_changed && series_open {
+                xml.push_str("</Series>");
+                series_open = false;
+            }
+            if study_changed && study_open {
+                xml.push_str("</Study>");
+                study_open = false;
+            }
+            if patient_changed && patient_open {
+                xml.push_str("</Patient>");
+                patient_open = false;
+            }
+
+            if patient_changed {
+                xml.push_str("<Patient");
+                push_attr(&mut xml, "PatientID", patient_id);
+                push_attr(&mut xml, "PatientName", patient_name);
+                push_attr(&mut xml, "PatientSex", patient_sex);
+                xml.push('>');
+                patient_open = true;
+                current_patient_id = Some(patient_id);
+                current_patient_name = Some(patient_name);
+                current_patient_sex = Some(patient_sex);
+            }
+
+            if study_changed {
+                xml.push_str("<Study");
+                push_attr(
+                    &mut xml,
+                    "AccessionNumber",
+                    row.accession_no.as_deref().unwrap_or(""),
+                );
+                push_attr(&mut xml, "ReferringPhysicianName", "");
+                let study_date = row.study_date.as_deref().unwrap_or("");
+                let normalized_date = normalize_dicom_date(study_date);
+                push_attr(&mut xml, "StudyDate", normalized_date.as_ref());
+                push_attr(
+                    &mut xml,
+                    "StudyDescription",
+                    row.study_description.as_deref().unwrap_or(""),
+                );
+                push_attr(&mut xml, "StudyID", "");
+                push_attr(&mut xml, "StudyInstanceUID", study_uid);
+                push_attr(
+                    &mut xml,
+                    "StudyTime",
+                    row.study_time.as_deref().unwrap_or(""),
+                );
+                xml.push('>');
+                study_open = true;
+                current_study_uid = Some(study_uid);
+            }
+
+            if series_changed {
+                xml.push_str("<Series");
+                push_attr(
+                    &mut xml,
+                    "Modality",
+                    row.modality.as_deref().unwrap_or(""),
+                );
+                push_attr(
+                    &mut xml,
+                    "SeriesDescription",
+                    row.series_description.as_deref().unwrap_or(""),
+                );
+                push_attr(&mut xml, "SeriesInstanceUID", series_uid);
+                push_attr(
+                    &mut xml,
+                    "SeriesNumber",
+                    row.series_no.as_deref().unwrap_or(""),
+                );
+                xml.push('>');
+                series_open = true;
+                current_series_uid = Some(series_uid);
+            }
+
+            xml.push_str("<Instance");
+            push_attr(
+                &mut xml,
+                "InstanceNumber",
+                row.inst_no.as_deref().unwrap_or(""),
+            );
+            push_attr(&mut xml, "SOPInstanceUID", row.sop_instance_uid.as_str());
+            xml.push_str("/>");
+        }
+
+        if series_open {
+            xml.push_str("</Series>");
+        }
+        if study_open {
+            xml.push_str("</Study>");
+        }
+        if patient_open {
+            xml.push_str("</Patient>");
+        }
+
+        xml.push_str("</arcQuery>");
+        xml.push_str("</manifest>");
 
         Ok(StudyTokenOutput::Xml(xml))
     }
@@ -756,7 +893,7 @@ pub async fn execute_study_token(
 
         let access_type = AccessType::from_param(params.access_type.as_str()).ok_or_else(|| {
             AppError::bad_request(format!(
-                "unsupported accessType: {} (supported: ohif, weasis.xml, dicom.zip, cornerstone.json)",
+                "unsupported accessType: {} (supported: ohif, weasis.xml, dicom.zip)",
                 params.access_type
             ))
         })?;
@@ -765,15 +902,12 @@ pub async fn execute_study_token(
         // --------------------------------------------------------------
         // 1. VALIDATE JWT TOKEN
         // --------------------------------------------------------------
-        let jwt_claims: Option<AuthClaims> = match settings.jwt_auth {
-            JwtAuthMethod::None => None,
-            JwtAuthMethod::Standard | JwtAuthMethod::OneTime => {
-                let token = params
-                    .token
-                    .as_ref()
-                    .ok_or_else(|| AppError::unauthorized("missing token"))?;
-                Some(auth::validate_jwt_token(token, settings.as_ref())?)
-            }
+        let jwt_claims: AuthClaims = {
+            let token = params
+                .token
+                .as_ref()
+                .ok_or_else(|| AppError::unauthorized("missing token"))?;
+            auth::validate_jwt_token(token, settings.as_ref())?
         };
 
         // Enforce strict one-time semantics for the /studyToken JWT.
@@ -826,16 +960,16 @@ pub async fn execute_study_token(
         // ------------------------------------------------------------
         let include_ohif_metadata = matches!(access_type, AccessType::Ohif);
 
-        // Viewer-style clients (OHIF/Weasis/Cornerstone) need per-instance retrieval URLs.
+        // Viewer-style clients (OHIF) need per-instance retrieval URLs.
         let needs_download_urls = matches!(
             access_type,
-            AccessType::Ohif | AccessType::Weasis | AccessType::Cornerstone
+            AccessType::Ohif | AccessType::Weasis
         );
 
         // Only request filesystem references when we can actually use them.
         // - OneTime: we persist per-file refs for enforced downloads.
         // - ZIP: we may prefer file:// sources when available.
-        // - Viewer-style (OHIF/Weasis/Cornerstone): we embed filesystem refs into local
+        // - Viewer-style (OHIF/Weasis): we embed filesystem refs into local
         //   download URLs/tokens so the /files endpoint can serve FS-first (with WADO fallback).
         let filesystem_configured = !settings.dicomarchive.filesystems.is_empty();
         let include_filesystem = filesystem_configured
@@ -873,22 +1007,36 @@ pub async fn execute_study_token(
         }
 
         // ------------------------------------------------------------
-        // 4. CREATE DOWNLOAD SESSION (ONLY IF OneTime)
+        // 4. CREATE DOWNLOAD SESSION
         // ------------------------------------------------------------
+        // We always create a session for Weasis so the /wado proxy can resolve
+        // filesystem vs WADO source via a single app-DB lookup per instance.
+        // This avoids touching the PACS DB on the hot-path.
         let mut session_id: Option<String> = None;
-        let mut session_expires_at: Option<DateTime<Utc>> = None;
         let mut persisted_files_for_zip: Option<Vec<DownloadSessionFile>> = None;
 
-        if matches!(settings.jwt_auth, JwtAuthMethod::OneTime) {
-            let claims = jwt_claims
-                .as_ref()
-                .ok_or_else(|| AppError::unauthorized("invalid token"))?;
+        let create_session = matches!(settings.jwt_auth, JwtAuthMethod::OneTime)
+            || matches!(access_type, AccessType::Weasis | AccessType::Ohif);
 
-            let new_session_id = Uuid::new_v4().to_string();
-            let expires_at = DateTime::<Utc>::from_timestamp(claims.exp as i64, 0)
+        if create_session {
+            let exp = jwt_claims.exp;
+            let expires_at = DateTime::<Utc>::from_timestamp(jwt_claims.exp as i64, 0)
                 .ok_or(AppError::Internal(anyhow::anyhow!("Invalid expiration timestamp")))?;
 
-            let session = DownloadSession::new(new_session_id.clone(), expires_at, rows.len() as u32);
+            // Bind the download session to the JWT token that created it.
+            let token_hash = params
+                .token
+                .as_deref()
+                .map(|t| Sha256::digest(t.as_bytes()).to_vec());
+
+            let new_session_id = Uuid::new_v4().to_string();
+
+            let session = DownloadSession::new(
+                new_session_id.clone(),
+                expires_at,
+                rows.len() as u32,
+                token_hash,
+            );
 
             let files = rows
                 .iter()
@@ -905,17 +1053,20 @@ pub async fn execute_study_token(
                 })
                 .collect::<Vec<_>>();
 
-            let token = params
-                .token
-                .as_deref()
-                .ok_or_else(|| AppError::unauthorized("missing token"))?;
+            if matches!(settings.jwt_auth, JwtAuthMethod::OneTime) {
+                let token = params
+                    .token
+                    .as_deref()
+                    .ok_or_else(|| AppError::unauthorized("missing token"))?;
 
-            session_repo
-                .create_session_with_files_and_claim_token(&session, &files, token, claims.exp)
-                .await?;
+                session_repo
+                    .create_session_with_files_and_claim_token(&session, &files, token, exp)
+                    .await?;
+            } else {
+                session_repo.create_session_with_files(&session, &files).await?;
+            }
 
             session_id = Some(new_session_id);
-            session_expires_at = Some(expires_at);
 
             // Only keep the per-file list in memory if we need it to build ZIP sources.
             if matches!(access_type, AccessType::Zip) {
@@ -927,62 +1078,45 @@ pub async fn execute_study_token(
         // 5. BUILD PLAN (domain) and RENDER (presentation)
         // ------------------------------------------------------------
 
-        let total_files = rows.len() as u32;
-
+        // Determine base URL for retrieval URLs and download tokens:
+        // - If a proxy URI is configured, use it (it should be configured to point to this server or a compatible proxy).
+        // - Otherwise, use the DICOM archive's manifest base URL if configured (it should be configured to point to this server or a compatible proxy).
+        // - Otherwise, fall back to the provided server_base_url (which should be the public URL of this server).
         let base_url = params.proxy_uri.clone()
             .unwrap_or(settings.dicomarchive.manifest_base_url.clone()
             .unwrap_or(server_base_url.to_string()));
 
-        // Standard/None: build stateless signed download tokens.
-        let token_urls = if session_id.is_none() && needs_download_urls {
-            let now = Utc::now().timestamp().max(0) as usize;
-            let mut exp = now + 15 * 60;
-            if let Some(claims) = jwt_claims.as_ref() {
-                exp = exp.min(claims.exp);
-            }
-            if exp <= now {
-                return Err(AppError::unauthorized("unauthorized"));
-            }
 
-            let mut urls = Vec::with_capacity(rows.len());
-            for r in &rows {
-                let claims = auth::DownloadClaims {
-                    aud: "sirius-hip-dl".to_string(),
-                    exp,
-                    study_uid: r.study_instance_uid.clone(),
-                    series_uid: r.series_instance_uid.clone(),
-                    sop_uid: r.sop_instance_uid.clone(),
-                    filesystem_fk: if r.use_filesystem { r.filesystem_fk } else { None },
-                    relative_file_path: if r.use_filesystem {
-                        r.relative_file_path.clone()
-                    } else {
-                        None
-                    },
-                };
-                let token = auth::encode_download_token(&claims, settings.as_ref())
-                    .map_err(|_| AppError::unauthorized("unauthorized"))?;
-                let url = format!("{}/files/{}", base_url, token);
-                urls.push(url.clone());
-            }
-            Some(urls)
-        } else {
-            None
-        };
-
+         
         // Build retrieval URLs according to access type and session mode.
         // Also build ZIP sources accordingly.
-        let retrieve_urls = if matches!(access_type, AccessType::Zip) {
-            // ZIP presenter doesn't need per-row retrieval URLs.
+        let retrieve_urls = if matches!(access_type, AccessType::Zip) || matches!(access_type, AccessType::Weasis) {
+            // ZIP and Weasis presenter doesn't need per-row retrieval URLs.
             Vec::new()
         } else if let Some(ref sid) = session_id {
             // OneTime/Standard/None: point to local /files/{session}/{index} URLs.
             // - OneTime is enforced by the /files endpoint
             // - Standard/None uses the same endpoint as a proxy
+            let token_qs = if matches!(access_type, AccessType::Ohif) {
+                Some(
+                    params
+                        .token
+                        .as_deref()
+                        .ok_or_else(|| AppError::unauthorized("missing token"))?,
+                )
+            } else {
+                None
+            };
+
             (0..rows.len())
-                .map(|idx| format!("{}/files/{}/{}", base_url, sid, idx))
+                .map(|idx| {
+                    if let Some(t) = token_qs {
+                        format!("{}/files/{}/{}?token={}", base_url, sid, idx, t)
+                    } else {
+                        format!("{}/files/{}/{}", base_url, sid, idx)
+                    }
+                })
                 .collect::<Vec<_>>()
-        } else if let Some(urls) = token_urls {
-            urls
         } else {
             // Non-ZIP responses without a session (should be rare).
             rows.iter().map(|r| build_wado_url(settings.as_ref(), r)).collect::<Vec<_>>()
@@ -1066,10 +1200,8 @@ pub async fn execute_study_token(
             params,
             access_type,
             rows,
-            total_files,
-            session_id: session_id.clone(),
-            expires_at: session_expires_at,
-            base_url: base_url.clone(),
+            session_id: session_id,
+            base_url: base_url,
             retrieve_urls,
             zip_sources,
         };
@@ -1084,14 +1216,18 @@ pub async fn execute_study_token(
 
         let output = match plan.access_type {
             AccessType::Zip => ZipPresenter.render(plan).await?,
-            AccessType::Weasis => WeasisPresenter.render(plan).await?,
+            AccessType::Weasis => {
+                let presenter = WeasisPresenter {
+                    settings: settings.clone(),
+                };
+                presenter.render(plan).await?
+            }            
             AccessType::Ohif => {
                 let presenter = OhifPresenter {
                     settings: settings.clone(),
                 };
                 presenter.render(plan).await?
             }
-            AccessType::Cornerstone => CornerstonePresenter.render(plan).await?,
         };
 
         Ok(output)

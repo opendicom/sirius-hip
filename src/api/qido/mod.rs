@@ -72,7 +72,7 @@ pub async fn studies(params: QueryString<QidoStudiesParams>, pool: Data<MySqlPoo
     let params = params.into_inner();
 
     // // -- JWT Authorization ------------------------------------------------------------------------- // 
-    // if settings.jwt_auth != JwtAuthMethod::None {
+    // If JWT auth is enabled, validate the token.
     //     if let Some(token) = &params.token {
     //         validate_token(token, &settings).context("Autorization error")?;
     //     } else {

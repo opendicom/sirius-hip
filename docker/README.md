@@ -30,7 +30,7 @@ Sirius HIP Docker image supports the following environment variables.
 - `CORS_WHITELIST` (default: `["*"]`)
 
 ### JWT
-- `SIRIUS_HIP_JWT_AUTH` (default: `none`, values: `none|standard|onetime`)
+- `SIRIUS_HIP_JWT_AUTH` (values: `standard|onetime`)
 - `AUTH_JWT_SECRET` (default: `secret`)
 - `AUTH_JWT_ALGO` (default: `HS256`)
 

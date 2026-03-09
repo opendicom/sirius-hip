@@ -36,6 +36,9 @@ pub enum AppError {
     #[error("one-time token store not supported by this backend")]
     OneTimeTokenStoreUnsupported,
 
+    #[error("session token binding not supported by this backend")]
+    SessionTokenBindingUnsupported,
+
     // ---------- Infrastructure ----------
 
     #[error("database error")]
@@ -85,6 +88,8 @@ impl ResponseError for AppError {
 
             AppError::OneTimeTokenStoreUnsupported => StatusCode::NOT_IMPLEMENTED,
 
+            AppError::SessionTokenBindingUnsupported => StatusCode::NOT_IMPLEMENTED,
+
             AppError::DownloadSessionNotFound
             | AppError::FileIndexNotFound(_) => StatusCode::NOT_FOUND,
 
@@ -133,6 +138,11 @@ impl ResponseError for AppError {
             
             AppError::OneTimeTokenStoreUnsupported => (
                 "ONE_TIME_TOKEN_STORE_UNSUPPORTED", "one-time token store not supported by this backend".to_string(),
+            ),
+
+            AppError::SessionTokenBindingUnsupported => (
+                "SESSION_TOKEN_BINDING_UNSUPPORTED",
+                "session token binding not supported by this backend".to_string(),
             ),
 
             AppError::DownloadSessionNotFound => (

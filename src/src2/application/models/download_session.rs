@@ -23,6 +23,11 @@ pub struct DownloadSession {
 
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
+
+    /// SHA-256 hash of the JWT token that created this session.
+    ///
+    /// This binds `/wado` and `/files/{session}/{index}` requests to the same JWT.
+    pub token_hash: Option<Vec<u8>>,
 }
 
 impl DownloadSession {
@@ -31,12 +36,14 @@ impl DownloadSession {
         session_id: String,
         expires_at: DateTime<Utc>,
         total_files: u32,
+        token_hash: Option<Vec<u8>>,
     ) -> Self {
         Self {
             session_id,
             expires_at,
             total_files,
             created_at: Utc::now(),
+            token_hash,
         }
     }
 }

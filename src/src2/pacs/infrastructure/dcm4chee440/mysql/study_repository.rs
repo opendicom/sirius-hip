@@ -162,7 +162,7 @@ impl StudyRepository for Dcm4chee440MySqlStudyRepository {
         let overrides = criteria.metadata_overrides;
 
         // Join patient tables only when required.
-        // For Cornerstone/Weasis/Zip (no patient fields rendered) we avoid patient joins unless
+        // For Weasis/Zip (no patient fields rendered) we avoid patient joins unless
         // the request includes patient-level filters.
         let patient_id_override = override_col(overrides, "PatientID");
         let needs_patient_name_filter = criteria.patient_fullname.is_some();

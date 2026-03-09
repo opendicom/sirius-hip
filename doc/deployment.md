@@ -28,7 +28,7 @@ The reference stack (PACS + MySQL + OHIF + Sirius HIP) lives under [docker/](../
 
    Important values:
    - `SIRIUS_HIP_PACS_VERSION`: `dcm4chee2183` or `dcm4chee440`
-   - `SIRIUS_HIP_JWT_AUTH`: `none`, `standard`, or `onetime`
+   - `SIRIUS_HIP_JWT_AUTH`: `standard` or `onetime`
    - `SIRIUS_HIP_FS_MAPPINGS`: filesystem mappings used for fast-path file reads
 
 3. Start the stack:

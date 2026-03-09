@@ -12,7 +12,6 @@ use super::extract_token_from_headers;
 
 /// Handles HTTP requests for the study token endpoint, which generates a token 
 /// that can be used to access study data in various formats 
-/// - Cornerstone manifest
 /// - Weasis manifest
 /// - OHIF manifest
 /// - DICOM ZIP

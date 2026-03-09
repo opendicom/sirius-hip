@@ -50,7 +50,8 @@ impl MySqlDownloadSessionRepository {
                 session_id        VARCHAR(64) PRIMARY KEY NOT NULL,
                 expires_at        DATETIME NOT NULL,
                 total_files       INT NOT NULL,
-                created_at        DATETIME NOT NULL
+                created_at        DATETIME NOT NULL,
+                token_hash        BINARY(32) NULL
             );
             "#,
         )
@@ -100,6 +101,28 @@ impl MySqlDownloadSessionRepository {
                 FOREIGN KEY (session_id, file_index)
                   REFERENCES HIP_download_session_files(session_id, file_index)
                   ON DELETE CASCADE
+            );
+            "#,
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // WADO claim variants: Weasis may request the same SOP instance multiple times
+        // with different contentType values (e.g. application/dicom vs image/jpeg).
+        // Keep this separate from HIP_download_session_claims so /files remains strict per file.
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS HIP_download_session_wado_claims (
+                session_id   VARCHAR(64)  NOT NULL,
+                instance_uid VARCHAR(250) NOT NULL,
+                content_type VARCHAR(128) NOT NULL,
+                claimed_at   DATETIME     NOT NULL,
+
+                PRIMARY KEY (session_id, instance_uid, content_type),
+                FOREIGN KEY (session_id)
+                  REFERENCES HIP_download_sessions(session_id)
+                  ON DELETE CASCADE,
+                INDEX idx_hip_download_session_wado_claims_session (session_id)
             );
             "#,
         )
@@ -202,15 +225,17 @@ impl DownloadSessionRepository for MySqlDownloadSessionRepository {
                 session_id,
                 expires_at,
                 total_files,
-                created_at
+                created_at,
+                token_hash
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             "#,
         )
         .bind(&session.session_id)
         .bind(session.expires_at)
         .bind(session.total_files as i64)
         .bind(session.created_at)
+        .bind(&session.token_hash)
         .execute(&mut *tx)
         .await?;
 
@@ -255,15 +280,17 @@ impl DownloadSessionRepository for MySqlDownloadSessionRepository {
                 session_id,
                 expires_at,
                 total_files,
-                created_at
+                created_at,
+                token_hash
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             "#,
         )
         .bind(&session.session_id)
         .bind(session.expires_at)
         .bind(session.total_files as i64)
         .bind(session.created_at)
+        .bind(&session.token_hash)
         .execute(&mut *tx)
         .await?;
 
@@ -301,19 +328,75 @@ impl DownloadSessionRepository for MySqlDownloadSessionRepository {
                 session_id,
                 expires_at,
                 total_files,
-                created_at
+                created_at,
+                token_hash
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             "#,
         )
         .bind(&session.session_id)
         .bind(session.expires_at)
         .bind(session.total_files as i64)
         .bind(session.created_at)
+        .bind(&session.token_hash)
         .execute(&self.pool)
         .await?;
 
         Ok(())
+    }
+
+    async fn assert_session_token_bound(
+        &self,
+        session_id: &str,
+        token: &str,
+    ) -> Result<(), AppError> {
+        let expected_hash: Vec<u8> = Sha256::digest(token.as_bytes()).to_vec();
+
+        let row = sqlx::query(
+            r#"
+            SELECT token_hash
+            FROM HIP_download_sessions
+            WHERE session_id = ?
+              AND expires_at >= UTC_TIMESTAMP()
+            LIMIT 1
+            "#,
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            // Preserve existing behavior: distinguish session not found vs expired.
+            let row = sqlx::query(
+                r#"
+                SELECT expires_at
+                FROM HIP_download_sessions
+                WHERE session_id = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+            let Some(row) = row else {
+                return Err(AppError::DownloadSessionNotFound);
+            };
+
+            let expires_at: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
+            if expires_at < chrono::Utc::now() {
+                return Err(AppError::DownloadSessionExpired);
+            }
+
+            return Err(AppError::DownloadSessionNotFound);
+        };
+
+        let token_hash: Option<Vec<u8>> = row.try_get("token_hash")?;
+        if token_hash.as_deref() == Some(expected_hash.as_slice()) {
+            return Ok(());
+        }
+
+        Err(AppError::unauthorized("unauthorized"))
     }
 
 
@@ -350,30 +433,134 @@ impl DownloadSessionRepository for MySqlDownloadSessionRepository {
     async fn get_file(&self, session_id: &str, file_index: u32) -> Result<DownloadSessionFile, AppError> {
         let row = sqlx::query(
             r#"
-            SELECT session_id, file_index, instance_uid, study_uid, series_uid, use_wado, filesystem_fk, relative_file_path
-            FROM HIP_download_session_files
-            WHERE session_id = ? AND file_index = ?
+            SELECT f.session_id, f.file_index, f.instance_uid, f.study_uid, f.series_uid, f.use_wado, f.filesystem_fk, f.relative_file_path
+            FROM HIP_download_session_files f
+            JOIN HIP_download_sessions s ON s.session_id = f.session_id
+            WHERE f.session_id = ?
+              AND f.file_index = ?
+              AND s.expires_at >= UTC_TIMESTAMP()
             "#,
         )
         .bind(session_id)
         .bind(file_index as i64)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => AppError::FileIndexNotFound(file_index),
-            other => AppError::Database(other),
-        })?;
+        .fetch_optional(&self.pool)
+        .await?;
 
-        Ok(DownloadSessionFile {
-            session_id: row.try_get::<String, _>("session_id")?,
-            file_index: (row.try_get::<i64, _>("file_index")? as u32),
-            instance_uid: row.try_get("instance_uid")?,
-            study_uid: row.try_get("study_uid")?,
-            series_uid: row.try_get("series_uid")?,
-            use_wado: row.try_get("use_wado")?,
-            filesystem_fk: row.try_get("filesystem_fk")?,
-            relative_file_path: row.try_get("relative_file_path")?,
-        })
+        if let Some(row) = row {
+            return Ok(DownloadSessionFile {
+                session_id: row.try_get::<String, _>("session_id")?,
+                file_index: (row.try_get::<i64, _>("file_index")? as u32),
+                instance_uid: row.try_get("instance_uid")?,
+                study_uid: row.try_get("study_uid")?,
+                series_uid: row.try_get("series_uid")?,
+                use_wado: row.try_get("use_wado")?,
+                filesystem_fk: row.try_get("filesystem_fk")?,
+                relative_file_path: row.try_get("relative_file_path")?,
+            });
+        }
+
+        // Slow-path: determine why we didn't return a file.
+        let row = sqlx::query(
+            r#"
+            SELECT
+                s.expires_at AS expires_at,
+                f.session_id IS NOT NULL AS file_exists
+            FROM HIP_download_sessions s
+            LEFT JOIN HIP_download_session_files f
+              ON f.session_id = s.session_id
+             AND f.file_index = ?
+            WHERE s.session_id = ?
+            "#,
+        )
+        .bind(file_index as i64)
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Err(AppError::DownloadSessionNotFound);
+        };
+
+        let expires_at: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
+        if expires_at < chrono::Utc::now() {
+            return Err(AppError::DownloadSessionExpired);
+        }
+
+        let file_exists: bool = row.try_get("file_exists")?;
+        if !file_exists {
+            return Err(AppError::FileIndexNotFound(file_index));
+        }
+
+        Err(AppError::FileIndexNotFound(file_index))
+    }
+
+    async fn get_file_by_instance_uid(
+        &self,
+        session_id: &str,
+        instance_uid: &str,
+    ) -> Result<DownloadSessionFile, AppError> {
+        let row = sqlx::query(
+            r#"
+            SELECT f.session_id, f.file_index, f.instance_uid, f.study_uid, f.series_uid, f.use_wado, f.filesystem_fk, f.relative_file_path
+            FROM HIP_download_session_files f
+            JOIN HIP_download_sessions s ON s.session_id = f.session_id
+            WHERE f.session_id = ?
+              AND f.instance_uid = ?
+              AND s.expires_at >= UTC_TIMESTAMP()
+            LIMIT 1
+            "#,
+        )
+        .bind(session_id)
+        .bind(instance_uid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            return Ok(DownloadSessionFile {
+                session_id: row.try_get::<String, _>("session_id")?,
+                file_index: (row.try_get::<i64, _>("file_index")? as u32),
+                instance_uid: row.try_get("instance_uid")?,
+                study_uid: row.try_get("study_uid")?,
+                series_uid: row.try_get("series_uid")?,
+                use_wado: row.try_get("use_wado")?,
+                filesystem_fk: row.try_get("filesystem_fk")?,
+                relative_file_path: row.try_get("relative_file_path")?,
+            });
+        }
+
+        // Slow-path: decide between session missing/expired vs instance missing.
+        let row = sqlx::query(
+            r#"
+            SELECT
+                s.expires_at AS expires_at,
+                f.session_id IS NOT NULL AS file_exists
+            FROM HIP_download_sessions s
+            LEFT JOIN HIP_download_session_files f
+              ON f.session_id = s.session_id
+             AND f.instance_uid = ?
+            WHERE s.session_id = ?
+            "#,
+        )
+        .bind(instance_uid)
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Err(AppError::DownloadSessionNotFound);
+        };
+
+        let expires_at: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
+        if expires_at < chrono::Utc::now() {
+            return Err(AppError::DownloadSessionExpired);
+        }
+
+        let file_exists: bool = row.try_get("file_exists")?;
+        if !file_exists {
+            return Err(AppError::FileIndexNotFound(0));
+        }
+
+        Err(AppError::FileIndexNotFound(0))
     }
 
     async fn consume_session(&self, session_id: &str) -> Result<(), AppError> {
@@ -499,6 +686,177 @@ impl DownloadSessionRepository for MySqlDownloadSessionRepository {
         }
 
         Err(AppError::FileIndexNotFound(file_index))
+    }
+
+    async fn claim_file_by_instance_uid(
+        &self,
+        session_id: &str,
+        instance_uid: &str,
+    ) -> Result<DownloadSessionFile, AppError> {
+        let file = self
+            .get_file_by_instance_uid(session_id, instance_uid)
+            .await?;
+
+        let insert_res = sqlx::query(
+            r#"
+            INSERT INTO HIP_download_session_claims (session_id, file_index, claimed_at)
+            SELECT f.session_id, f.file_index, UTC_TIMESTAMP()
+            FROM HIP_download_session_files f
+            JOIN HIP_download_sessions s ON s.session_id = f.session_id
+            WHERE f.session_id = ?
+              AND f.file_index = ?
+              AND f.instance_uid = ?
+              AND s.expires_at >= UTC_TIMESTAMP()
+            "#,
+        )
+        .bind(session_id)
+        .bind(file.file_index as i64)
+        .bind(instance_uid)
+        .execute(&self.pool)
+        .await;
+
+        match insert_res {
+            Ok(r) => {
+                if r.rows_affected() == 1 {
+                    return Ok(file);
+                }
+            }
+            Err(e) => {
+                let duplicate = match &e {
+                    sqlx::Error::Database(db) => db.code().as_deref() == Some("23000"),
+                    _ => false,
+                };
+                if duplicate {
+                    return Err(AppError::FileAlreadyDownloaded(file.file_index));
+                }
+                return Err(AppError::Database(e));
+            }
+        }
+
+        let row = sqlx::query(
+            r#"
+            SELECT
+                s.expires_at AS expires_at,
+                c.session_id IS NOT NULL AS claimed
+            FROM HIP_download_sessions s
+            LEFT JOIN HIP_download_session_claims c
+              ON c.session_id = s.session_id
+             AND c.file_index = ?
+            WHERE s.session_id = ?
+            "#,
+        )
+        .bind(file.file_index as i64)
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Err(AppError::DownloadSessionNotFound);
+        };
+
+        let expires_at: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
+        if expires_at < chrono::Utc::now() {
+            return Err(AppError::DownloadSessionExpired);
+        }
+
+        let claimed: bool = row.try_get("claimed")?;
+        if claimed {
+            return Err(AppError::FileAlreadyDownloaded(file.file_index));
+        }
+
+        Err(AppError::FileIndexNotFound(file.file_index))
+    }
+
+    async fn claim_wado_by_instance_uid_and_content_type(
+        &self,
+        session_id: &str,
+        instance_uid: &str,
+        content_type: &str,
+    ) -> Result<DownloadSessionFile, AppError> {
+        let file = self
+            .get_file_by_instance_uid(session_id, instance_uid)
+            .await?;
+
+        let insert_res = sqlx::query(
+            r#"
+            INSERT INTO HIP_download_session_wado_claims (session_id, instance_uid, content_type, claimed_at)
+            SELECT f.session_id, f.instance_uid, ?, UTC_TIMESTAMP()
+            FROM HIP_download_session_files f
+            JOIN HIP_download_sessions s ON s.session_id = f.session_id
+            WHERE f.session_id = ?
+              AND f.instance_uid = ?
+              AND s.expires_at >= UTC_TIMESTAMP()
+            "#,
+        )
+        .bind(content_type)
+        .bind(session_id)
+        .bind(instance_uid)
+        .execute(&self.pool)
+        .await;
+
+        match insert_res {
+            Ok(r) => {
+                if r.rows_affected() == 1 {
+                    return Ok(file);
+                }
+            }
+            Err(e) => {
+                let duplicate = match &e {
+                    sqlx::Error::Database(db) => db.code().as_deref() == Some("23000"),
+                    _ => false,
+                };
+                if duplicate {
+                    return Err(AppError::FileAlreadyDownloaded(file.file_index));
+                }
+                return Err(AppError::Database(e));
+            }
+        }
+
+        // Slow-path: determine why the claim failed.
+        let row = sqlx::query(
+            r#"
+            SELECT
+                s.expires_at AS expires_at,
+                f.session_id IS NOT NULL AS file_exists,
+                c.session_id IS NOT NULL AS claimed
+            FROM HIP_download_sessions s
+            LEFT JOIN HIP_download_session_files f
+              ON f.session_id = s.session_id
+             AND f.instance_uid = ?
+            LEFT JOIN HIP_download_session_wado_claims c
+              ON c.session_id = s.session_id
+             AND c.instance_uid = ?
+             AND c.content_type = ?
+            WHERE s.session_id = ?
+            "#,
+        )
+        .bind(instance_uid)
+        .bind(instance_uid)
+        .bind(content_type)
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Err(AppError::DownloadSessionNotFound);
+        };
+
+        let expires_at: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
+        if expires_at < chrono::Utc::now() {
+            return Err(AppError::DownloadSessionExpired);
+        }
+
+        let claimed: bool = row.try_get("claimed")?;
+        if claimed {
+            return Err(AppError::FileAlreadyDownloaded(file.file_index));
+        }
+
+        let file_exists: bool = row.try_get("file_exists")?;
+        if !file_exists {
+            return Err(AppError::FileIndexNotFound(file.file_index));
+        }
+
+        Err(AppError::FileIndexNotFound(file.file_index))
     }
 
     async fn claim_one_time_token(&self, token: &str, exp: usize) -> Result<(), AppError> {

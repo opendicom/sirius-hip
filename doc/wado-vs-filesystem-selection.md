@@ -21,7 +21,7 @@ The selection algorithm is intentionally conservative: it uses filesystem only f
 
 1. Validates JWT (depending on `settings.jwt_auth`).
 2. Queries the PACS database for the study/series/instances matching the request.
-3. Prepares a response payload (OHIF/Weasis/Cornerstone) or a ZIP plan.
+3. Prepares a response payload (OHIF/Weasis) or a ZIP plan.
 4. Optionally creates a **download session** (OneTime mode).
 
 Important: `/studyToken` intentionally avoids filesystem I/O. It does not open DICOM files; it only prepares **URLs** and/or **sources** for later retrieval.
@@ -53,7 +53,7 @@ These fields are precomputed in SQL so that `/studyToken` can be fast and predic
 - The request must be in a mode that benefits from FS refs:
   - `JwtAuthMethod::OneTime` (session-backed downloads persist FS refs), or
   - `accessType=dicom.zip` (ZIP may prefer `file://...` sources), or
-  - viewer-style responses (OHIF/Weasis/Cornerstone), where filesystem refs are embedded into local `/files/...` URLs/tokens so downloads can be **FS-first**.
+  - viewer-style responses (OHIF/Weasis), where filesystem refs are embedded into local `/files/...` URLs/tokens so downloads can be **FS-first**.
 
 ## Current selection logic (as implemented today)
 

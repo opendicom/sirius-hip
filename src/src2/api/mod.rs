@@ -1,10 +1,12 @@
 mod study_token_handler;
 mod files_handler;
 mod qido_handler;
+mod wado_handler;
 
 pub use study_token_handler::*;
 pub use files_handler::*;
 pub use qido_handler::*;
+pub use wado_handler::*;
 
 use actix_web::HttpRequest;
 use actix_web::http::header;

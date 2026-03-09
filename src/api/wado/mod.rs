@@ -26,7 +26,7 @@ pub async fn endpoint(_params: web::Query<Params>, req: HttpRequest, settings: w
     }
 
     // -- JWT Authorization ------------------------------------------------------------------------- // 
-    // if settings.jwt_auth != JwtAuthMethod::None {
+    // If JWT auth is enabled, validate the token.
     //     if let Some(token) = &params.token {
     //         validate_token(token, &settings).context("Autorization error")?;
     //     } else {

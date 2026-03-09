@@ -161,11 +161,7 @@ async fn run() -> anyhow::Result<()> {
     // Background cleanup for OneTime persistence (MySQL app-DB).
     // Multi-instance safe: the MySQL repo uses GET_LOCK so only one instance cleans.
     if settings.onetime_cleanup.enabled
-        && settings
-            .app_database_url
-            .as_deref()
-            .map(|u| u.starts_with("mysql://"))
-            .unwrap_or(false)
+        && settings.app_database_url.starts_with("mysql://")
     {
         let cleanup_repo = download_session_repo.clone();
         let cleanup_cfg = settings.onetime_cleanup.clone();
@@ -259,10 +255,6 @@ async fn run() -> anyhow::Result<()> {
             // - JwtAuthMethod::OneTime: denies re-downloads (bitset enforcement)
             // - JwtAuthMethod::{Standard,None}: streams/proxies without one-time enforcement
             .route(
-                "/files/{token}",
-                web::get().to(src2::api::download_token_handler),
-            )
-            .route(
                 "/files/{session_id}/{file_index}",
                 web::get().to(src2::api::download_file_handler),
             )
@@ -282,8 +274,8 @@ async fn run() -> anyhow::Result<()> {
             )
             
            
-           // -- WADO PROXY----------------------------------------------------------------------------------------//
-            .route("/wado", web::get().to(api::wado::endpoint))
+            // -- WADO PROXY------------------------------------------------------------------------------------ //
+            .route("/wado", web::get().to(src2::api::wado_handler))
             
 
             // -- QIDO ------------------------------------------------------------------------------------------ //

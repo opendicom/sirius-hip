@@ -142,10 +142,9 @@ function validateInputs() {
         "ohif": true,
         "weasis.xml": true,
         "dicom.zip": true,
-        "cornerstone.json": true,
     };
     if (!allowedAccessTypes[serverAccessType]) {
-        var msg = "Invalid accessType. Allowed values: ohif, weasis.xml, dicom.zip, cornerstone.json";
+        var msg = "Invalid accessType. Allowed values: ohif, weasis.xml, dicom.zip";
         setFieldValidState("in-accessType", msg);
         errors.push(msg);
     }

@@ -6,13 +6,11 @@ use crate::src2::application::repositories::factory::DownloadSessionRepositoryFa
 use crate::src2::application::infrastructure::mysql::download_session_repository::CleanupConfig;
 
 pub async fn init_download_session_repo(settings: &Settings) -> anyhow::Result<std::sync::Arc<dyn DownloadSessionRepository>> {
-    let url = settings.app_database_url.as_ref().ok_or_else(|| anyhow::anyhow!("No app_database_url configured"))?;
+    let url = settings.app_database_url.as_str();
 
     if url.starts_with("mysql://") {
         let mut options = MySqlPoolOptions::new();
-        if let Some(max) = settings.app_database_max_connections {
-            options = options.max_connections(max);
-        }
+        options = options.max_connections(settings.app_database_max_connections);
         // Keep this aligned with PACS pool behavior: fail fast on unavailable DB.
         options = options.acquire_timeout(std::time::Duration::from_secs(6));
 

@@ -70,16 +70,12 @@ pub struct MetadataOverride {
 /// JWT Authentication methods supported by Sirius HIP
 /// Used in the Settings struct
 /// Defines how JWT authentication is handled
-/// - None: No JWT authentication is performed
 /// - Standard: Standard JWT authentication without sessions
 /// - WzSession: JWT authentication tied to WZ sessions
 /// Used to control access to resources based on JWT tokens
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum JwtAuthMethod {
-    /// No JWT authentication
-    None,
-
     /// Standard JWT authentication
     Standard,
     
@@ -134,8 +130,10 @@ pub struct Settings {
     pub loglevel: String,
     pub max_default: u64,
 
-    pub app_database_url: Option<String>,
-    pub app_database_max_connections: Option<u32>,
+    pub app_database_url: String,
+
+    #[serde(default = "default_app_database_max_connections")]
+    pub app_database_max_connections: u32,
 
     pub studytoken_exclude_mods: Option<Vec<String>>,
     
@@ -150,6 +148,10 @@ pub struct Settings {
 
     pub dicomarchive: DicomArchive,
     pub cors_whitelist: Vec<String>,
+}
+
+fn default_app_database_max_connections() -> u32 {
+    20
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

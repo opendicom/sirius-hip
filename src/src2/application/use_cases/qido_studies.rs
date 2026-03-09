@@ -37,15 +37,12 @@ pub async fn execute_qido_studies(
     // --------------------------------------------------------------
     // 1. VALIDATE JWT TOKEN
     // --------------------------------------------------------------
-    let jwt_claims: Option<AuthClaims> = match settings.jwt_auth {
-        JwtAuthMethod::None => None,
-        JwtAuthMethod::Standard | JwtAuthMethod::OneTime => {
-            let token = params
-                .token
-                .as_ref()
-                .ok_or_else(|| AppError::unauthorized("missing token"))?;
-            Some(auth::validate_jwt_token(token, settings.as_ref())?)
-        }
+    let jwt_claims: AuthClaims = {
+        let token = params
+            .token
+            .as_ref()
+            .ok_or_else(|| AppError::unauthorized("missing token"))?;
+        auth::validate_jwt_token(token, settings.as_ref())?
     };
 
     // Enforce strict one-time semantics for the /qido/studies JWT.
@@ -55,10 +52,7 @@ pub async fn execute_qido_studies(
             .token
             .as_deref()
             .ok_or_else(|| AppError::unauthorized("missing token"))?;
-        let claims = jwt_claims
-            .as_ref()
-            .ok_or_else(|| AppError::unauthorized("invalid token"))?;
-        session_repo.claim_one_time_token(token, claims.exp).await?;
+        session_repo.claim_one_time_token(token, jwt_claims.exp).await?;
     }
 
     

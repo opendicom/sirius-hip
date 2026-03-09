@@ -35,8 +35,7 @@ Sirius HIP intentionally generates URLs that always hit Sirius HIP first, so it 
 
 - `/studyToken` builds a viewer-specific response containing URLs.
 - Downloads go through one of the `/files/...` endpoints:
-	- Stateless token downloads: `GET /files/{token}`
-	- Session-backed downloads: `GET /files/{session_id}/{file_index}` (used for one-time semantics)
+	- Session-backed downloads: `GET /files/{session_id}/{file_index}`
 
 See the deep-dive document: [doc/studyToken.md](studyToken.md).
 
