@@ -2,13 +2,14 @@ use actix_web::{HttpRequest, HttpResponse};
 use actix_web::web;
 use futures::StreamExt;
 use serde::Deserialize;
-use std::path::{Component, Path};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 
 use crate::src2::errors::app_error::AppError;
 use crate::src2::state2::AppState2;
-use crate::src2::utils::wado_proxy::{proxy_wado_url, wado_url_from_uids};
+use crate::src2::api::utils::path::safe_join_filesystem_path;
+use crate::src2::api::utils::wado::wado_url_from_uids;
+use crate::src2::api::utils::wado_proxy::proxy_wado_url;
 use crate::settings::JwtAuthMethod;
 use crate::auth;
 
@@ -18,22 +19,6 @@ use super::extract_token_from_headers;
 pub struct FilesQueryParams {
     pub token: Option<String>,
 }
-
-/// Safely joins a base path with a relative path, ensuring that the resulting path does not escape the base directory.
-fn safe_join_filesystem_path(base: &str, rel: &str) -> Option<String> {
-    let rel_path = Path::new(rel);
-    if rel_path.is_absolute() {
-        return None;
-    }
-    for comp in rel_path.components() {
-        match comp {
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-            Component::CurDir | Component::Normal(_) => {}
-        }
-    }
-    Path::new(base).join(rel_path).to_str().map(|s| s.to_string())
-}
-
 
 // =============================================================================================== //
 // HTTP HANDLER - /files/{session_id}/{file_index}                                                 //

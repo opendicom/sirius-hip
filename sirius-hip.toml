@@ -28,7 +28,7 @@ app_database_max_connections = 20
 # JWT Authorization configuration
 # Type of JWT authorization to use
 # Options:
-# - standard:   Standard JWT authorization, only verifies the token signature and expiration
+# - standard:   Standard JWT authorization, only verifies the token signature audience and expiration
 # - onetime:    One time download session. This method, creates an application session in the 
 #               application database and used to track the download progress of the studies 
 #               requested with that token ensuring that these studies can be downloaded only once.

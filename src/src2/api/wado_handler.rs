@@ -1,7 +1,6 @@
 use actix_web::{web, HttpRequest, HttpResponse};
 use futures::StreamExt;
 use serde::Deserialize;
-use std::path::{Component, Path};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 
@@ -9,75 +8,40 @@ use crate::auth;
 use crate::settings::JwtAuthMethod;
 use crate::src2::errors::app_error::AppError;
 use crate::src2::state2::AppState2;
-use crate::src2::utils::wado_proxy::proxy_wado_response;
+use crate::src2::api::utils::path::safe_join_filesystem_path;
+use crate::src2::api::utils::wado::{
+    build_upstream_url,
+    normalize_content_type,
+    normalize_transfer_syntax,
+    strip_internal_query_params,
+};
+use crate::src2::api::utils::wado_proxy::proxy_wado_response;
 
 use super::extract_token_from_headers;
 
 #[derive(Debug, Deserialize)]
 #[allow(non_snake_case)]
+/// Represents the query parameters for a WADO-URI request.
+/// This struct is used to deserialize the query parameters from the HTTP request and provides a structured way to access them in the handler logic.
 pub struct WadoQueryParams {
     pub studyUID: Option<String>,
     pub seriesUID: Option<String>,
     pub objectUID: String,
 
     pub contentType: Option<String>,
+    pub transferSyntax: Option<String>,
 
     pub token: Option<String>,
     pub session: Option<String>,
 }
 
-fn safe_join_filesystem_path(base: &str, rel: &str) -> Option<String> {
-    let rel_path = Path::new(rel);
-    if rel_path.is_absolute() {
-        return None;
-    }
-    for comp in rel_path.components() {
-        match comp {
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-            Component::CurDir | Component::Normal(_) => {}
-        }
-    }
-    Path::new(base).join(rel_path).to_str().map(|s| s.to_string())
-}
+// =============================================================================================== //
+// HTTP HANDLER - /wado                                                                            //
+// =============================================================================================== //
 
-fn build_upstream_url(wadouri_base: &str, query_string: &str) -> String {
-    if query_string.is_empty() {
-        return wadouri_base.to_string();
-    }
-    if wadouri_base.contains('?') {
-        format!("{wadouri_base}&{query_string}")
-    } else {
-        format!("{wadouri_base}?{query_string}")
-    }
-}
-
-fn normalize_content_type(v: Option<&str>) -> &str {
-    // WADO-URI: contentType is optional; treat missing/empty as DICOM.
-    // We only differentiate semantics by contentType (per user requirement),
-    // not by imageQuality/rows/columns/etc.
-    match v.map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        Some(ct) => ct,
-        None => "application/dicom",
-    }
-}
-
-fn strip_internal_query_params(query_string: &str) -> String {
-    // Never leak our internal security params to the upstream PACS.
-    // Keep everything else intact (percent-encoding included).
-    let mut out = Vec::new();
-    for part in query_string.split('&') {
-        if part.is_empty() {
-            continue;
-        }
-        let key = part.split_once('=').map(|(k, _)| k).unwrap_or(part);
-        if key == "token" || key == "session" {
-            continue;
-        }
-        out.push(part);
-    }
-    out.join("&")
-}
-
+/// Handles HTTP requests for the /wado endpoint, which serves DICOM files for download based on WADO-URI query parameters.
+/// It first validates the JWT token and ensures that the token is bound to the session. Then it attempts to resolve the file 
+/// from the session and claim it if using OneTime auth.
 pub async fn wado_handler(
     state: web::Data<AppState2>,
     req: HttpRequest,
@@ -91,7 +55,7 @@ pub async fn wado_handler(
     }
 
     // --------------------------------------------------------------
-    // 1) Validate auth according to settings
+    // 1. Validate auth according to settings
     // --------------------------------------------------------------
     match state.settings.jwt_auth {
         JwtAuthMethod::Standard | JwtAuthMethod::OneTime => {
@@ -121,14 +85,15 @@ pub async fn wado_handler(
         .await?;
 
     let content_type = normalize_content_type(query.contentType.as_deref());
+    let transfer_syntax = normalize_transfer_syntax(query.transferSyntax.as_deref(), &state.settings.dicomarchive.transfer_syntax);
 
     // --------------------------------------------------------------
-    // 2) Resolve file from session (and claim per instance in OneTime)
+    // 2. Resolve file from session (and claim per instance in OneTime)
     // --------------------------------------------------------------
     let f = if state.settings.jwt_auth == JwtAuthMethod::OneTime {
         state
             .download_session_repo
-            .claim_wado_by_instance_uid_and_content_type(session_id, &query.objectUID, content_type)
+            .claim_wado_by_instance_uid_and_content_type(session_id, &query.objectUID, content_type.as_ref())
             .await?
     } else {
         state
@@ -150,28 +115,31 @@ pub async fn wado_handler(
     }
 
     // --------------------------------------------------------------
-    // 3) Try filesystem first (fast-path).
+    // 3. Try filesystem first (fast-path).
     // --------------------------------------------------------------
-    // Rendered content-types (e.g. image/jpeg) must be handled by the upstream PACS.
-    if content_type.eq_ignore_ascii_case("application/dicom") {
-    if let (Some(fs_id), Some(rel)) = (f.filesystem_fk, f.relative_file_path.as_deref()) {
-        if let Some(base) = state.settings.dicomarchive.get_fs_path_by_id(fs_id) {
-            if let Some(abs_path) = safe_join_filesystem_path(base, rel) {
-                if let Ok(file) = File::open(&abs_path).await {
-                    let stream = ReaderStream::new(file).map(|chunk| {
-                        chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                    });
-                    return Ok(HttpResponse::Ok()
-                        .content_type("application/dicom")
-                        .streaming(stream));
+    // - `Content-Type` must be application/dicom or fall back to WADO for other content types (e.g. image/jpeg).
+    // - `TransferSyntax` must match application config or fall back to WADO for other transfer syntaxes.
+    if content_type.eq_ignore_ascii_case("application/dicom") 
+        && transfer_syntax.eq_ignore_ascii_case(&state.settings.dicomarchive.transfer_syntax) 
+    {
+        if let (Some(fs_id), Some(rel)) = (f.filesystem_fk, f.relative_file_path.as_deref()) {
+            if let Some(base) = state.settings.dicomarchive.get_fs_path_by_id(fs_id) {
+                if let Some(abs_path) = safe_join_filesystem_path(base, rel) {
+                    if let Ok(file) = File::open(&abs_path).await {
+                        let stream = ReaderStream::new(file).map(|chunk| {
+                            chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                        });
+                        return Ok(HttpResponse::Ok()
+                            .content_type("application/dicom")
+                            .streaming(stream));
+                    }
                 }
             }
         }
     }
-    }
 
     // --------------------------------------------------------------
-    // 4) Fallback to WADO backend proxy (stream, preserve headers)
+    // 4. Fallback to WADO backend proxy (stream, preserve headers)
     // --------------------------------------------------------------
     let filtered_qs = strip_internal_query_params(req.query_string());
     let upstream_url = build_upstream_url(&state.settings.dicomarchive.wadouri, &filtered_qs);
