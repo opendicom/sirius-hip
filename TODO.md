@@ -3,5 +3,8 @@
 - In conf validate usage of `institution_field` and `number_frames_field` 
 and move it to override_datasets if applied.
 
-- Change FS vs WADO selection for Study
-    Prefer WADO when study.updated_time + WINDOW_TIME is newer than the updated_time of any of the study’s Series.
+- Weasis fail to open manifest when the requested data to /studyToken contains "|" or "\"
+    - Error: SyntaxError: bad expression:"
+    - Examples:
+        - StudyDate=20260101|20260102       --> FAIL
+        - StudyInstanceUID=1.2.3.4\5.6.7.8  --> FAIL

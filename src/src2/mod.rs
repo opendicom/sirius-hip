@@ -6,4 +6,3 @@ pub mod init;
 pub mod state2;
 
 pub mod api;
-pub mod utils;
