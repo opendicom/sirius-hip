@@ -23,14 +23,18 @@ pub trait StudyRepository: Send + Sync {
     /// `include_filesystem` controls whether per-instance filesystem references
     /// (relative path + filesystem id) are selected.
     ///
-    /// `include_viewer_metadata` controls whether the additional patient/study/series/instance
-    /// metadata (including instance datasets like `inst_attrs`) required by viewer presenters
-    /// (OHIF/Weasis) is selected.
+    /// `include_ohif_metadata` controls whether the additional patient/study/series/instance
+    /// metadata (including instance datasets like `inst_attrs`) required by the OHIF presenter
+    /// is selected.
+    ///
+    /// `include_weasis_metadata` controls whether the additional patient/study/series/instance
+    /// metadata required by the Weasis presenter is selected.
     async fn fetch_study_token_rows(
         &self,
         criteria: StudyTokenSearchCriteria<'_>,
         include_filesystem: bool,
-        include_viewer_metadata: bool,
+        include_ohif_metadata: bool,
+        include_weasis_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError>;
 
     /// Executes a study-level query suitable for QIDO-RS `/studies`.

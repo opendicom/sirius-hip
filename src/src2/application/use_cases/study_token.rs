@@ -958,9 +958,9 @@ pub async fn execute_study_token(
         // ------------------------------------------------------------
         // 3. LOAD STUDY FROM PACS
         // ------------------------------------------------------------
-        // Viewer manifests (OHIF and Weasis) require patient/study/series/instance metadata.
-        // Without it, the presenter cannot render a valid output (e.g. Weasis needs PatientID/PatientName).
-        let include_viewer_metadata = matches!(access_type, AccessType::Ohif | AccessType::Weasis);
+        // Viewer manifests require additional patient/study/series/instance metadata.
+        let include_ohif_metadata = matches!(access_type, AccessType::Ohif);
+        let include_weasis_metadata = matches!(access_type, AccessType::Weasis);
 
         // Viewer-style clients (OHIF) need per-instance retrieval URLs.
         let needs_download_urls = matches!(
@@ -983,8 +983,9 @@ pub async fn execute_study_token(
             .fetch_study_token_rows(
                 criteria,
                 include_filesystem,
-                // Request extra OHIF metadata (patient/study/series/instance + inst_attrs).
-                include_viewer_metadata,
+                // Request extra viewer metadata depending on access type.
+                include_ohif_metadata,
+                include_weasis_metadata,
             )
             .await
             .map_err(AppError::Pacs)?;

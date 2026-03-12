@@ -5,7 +5,11 @@ use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
 use crate::src2::errors::PacsError;
 use crate::src2::pacs::read_models::QidoStudyRow;
 use crate::src2::pacs::read_models::StudyTokenRow;
-use crate::src2::pacs::infrastructure::mysql_sql_helpers::{override_col, override_or_default};
+use crate::src2::pacs::infrastructure::mysql_sql_helpers::{
+    MetadataMode, include_patient_metadata, metadata_mode, override_col, override_or_default,
+    select_mode3, select_non_none, select_ohif_only, select_patient_metadata,
+    select_patient_metadata_else,
+};
 use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::repositories::study_repository::{
     QidoStudiesIncludeFields, QidoStudiesSearchCriteria, StudyTokenSearchCriteria,
@@ -135,7 +139,10 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         criteria: StudyTokenSearchCriteria<'_>,
         include_filesystem: bool,
         include_ohif_metadata: bool,
+        include_weasis_metadata: bool,
     ) -> Result<Vec<StudyTokenRow>, PacsError> {
+        let metadata_mode = metadata_mode(include_ohif_metadata, include_weasis_metadata);
+        let include_patient_metadata = include_patient_metadata(metadata_mode);
         
         fn split_backslash(value: &str) -> Vec<&str> {
             value.split('\\').filter(|s| !s.is_empty()).collect()
@@ -153,20 +160,57 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         let overrides = criteria.metadata_overrides;
         let patient_id_override = override_col(overrides, "PatientID");
         let patient_name_override = override_col(overrides, "PatientName");
-        let needs_patient_name_filter = criteria.patient_fullname.is_some();
+        let has_patient_name_filter = criteria.patient_fullname.is_some();
         let needs_patient_id_filter_on_override = if criteria.patient_id.is_some() {
             matches!(patient_id_override.as_deref(), Some(c) if c.starts_with("patient."))
         } else {
             false
         };
-        // Optimization: join patient table when filtering by patient_id (if no override or override references patient)
+        // Optimization: join patient table when filtering by patient_id (if no override)
         // This allows the optimizer to use indexes directly instead of executing a subquery.
         let needs_patient_join_for_filter = criteria.patient_id.is_some() && patient_id_override.is_none();
-        let needs_patient_join = include_ohif_metadata
-            || needs_patient_name_filter
+
+        // Join patient table only if a selected expression (per MetadataMode) or a filter requires it.
+        let patient_sex_override = override_col(overrides, "PatientSex");
+        let patient_birthdate_override = override_col(overrides, "PatientBirthDate");
+
+        let needs_patient_join_for_patient_name_filter = if has_patient_name_filter {
+            match patient_name_override.as_deref() {
+                // If PatientName is overridden to a non-patient table (e.g. study.*), don't join patient.
+                Some(expr) => expr.starts_with("patient."),
+                // Default PatientName comes from patient.pat_name.
+                None => true,
+            }
+        } else {
+            false
+        };
+
+        let needs_patient_join_for_select = include_patient_metadata
+            && (
+                // Defaults for these fields reference patient.*; only skip join if caller overrides away from patient.*
+                match patient_name_override.as_deref() {
+                    Some(expr) => expr.starts_with("patient."),
+                    None => true,
+                }
+                || match patient_id_override.as_deref() {
+                    Some(expr) => expr.starts_with("patient."),
+                    None => true,
+                }
+                || match patient_sex_override.as_deref() {
+                    Some(expr) => expr.starts_with("patient."),
+                    None => true,
+                }
+                || (metadata_mode == MetadataMode::Ohif
+                    && match patient_birthdate_override.as_deref() {
+                        Some(expr) => expr.starts_with("patient."),
+                        None => true,
+                    })
+            );
+
+        let needs_patient_join = needs_patient_join_for_select
+            || needs_patient_join_for_patient_name_filter
             || needs_patient_id_filter_on_override
-            || needs_patient_join_for_filter
-            || matches!(patient_name_override.as_deref(), Some(c) if c.starts_with("patient."));
+            || needs_patient_join_for_filter;
         let patient_name_expr = override_or_default(overrides, "PatientName", "patient.pat_name");
         let patient_id_expr = override_or_default(overrides, "PatientID", "patient.pat_id");
         let patient_sex_expr = override_or_default(overrides, "PatientSex", "patient.pat_sex");
@@ -180,55 +224,37 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
         // - Optionally it can be overridden as a direct column value, e.g. from `study.study_custom1`.
         let institution_name_expr = override_col(overrides, "InstitutionName").unwrap_or_else(|| "NULL".to_string());
 
-        if include_ohif_metadata {
-            qb.push(
-                format!(
-                    "{} AS patient_name, 
-                     {} AS patient_id, 
-                     {} AS patient_sex, 
-                     {} AS patient_birthdate, 
-                    ",
-                    patient_name_expr,
-                    patient_id_expr,
-                    patient_sex_expr,
-                    patient_birthdate_expr,
-                ),
-            );
+        // ------------------------------------------------------------
+        // SELECT: Patient + Study columns
+        // ------------------------------------------------------------
+        let patient_name_select = select_patient_metadata(metadata_mode, &patient_name_expr);
+        let patient_id_select = select_patient_metadata(metadata_mode, &patient_id_expr);
+        let patient_sex_select = select_patient_metadata(metadata_mode, &patient_sex_expr);
+        let patient_birthdate_select = select_ohif_only(metadata_mode, &patient_birthdate_expr);
 
-            qb.push(
-                format!(
-                    "CAST(DATE(study.study_datetime) AS CHAR) AS study_date, 
-                     CAST(TIME(study.study_datetime) AS CHAR) AS study_time, 
-                     {} AS study_description,
-                     {} AS accession_no, 
-                     study.num_instances AS num_instances, 
-                     {} AS modalities,
-                     {} AS institution_name,
-                     NULL AS study_attrs,
-                    ",
-                    study_description_expr,
-                    accession_no_expr,
-                    modalities_expr,
-                    institution_name_expr,
-                ),
-            );
-        } else {
-            qb.push(
-                "NULL AS patient_name,
-                 NULL AS patient_id,
-                 NULL AS patient_sex,
-                 NULL AS patient_birthdate,
-                 CAST(DATE(study.study_datetime) AS CHAR) AS study_date,
-                 CAST(TIME(study.study_datetime) AS CHAR) AS study_time,
-                 NULL AS study_description,
-                 study.accession_no AS accession_no,
-                 study.num_instances AS num_instances,
-                 study.mods_in_study AS modalities,
-                 NULL AS institution_name,
-                 NULL AS study_attrs,
-            ",
-            );
-        }
+        let study_date_select = "CAST(DATE(study.study_datetime) AS CHAR)";
+        let study_time_select = "CAST(TIME(study.study_datetime) AS CHAR)";
+        let study_description_select = select_patient_metadata(metadata_mode, &study_description_expr);
+        let accession_no_select =
+            select_patient_metadata_else(metadata_mode, &accession_no_expr, "study.accession_no");
+        let num_instances_select =
+            select_mode3(metadata_mode, "study.num_instances", "NULL", "study.num_instances");
+        let modalities_select =
+            select_mode3(metadata_mode, "study.mods_in_study", "NULL", &modalities_expr);
+        let institution_name_select = select_ohif_only(metadata_mode, &institution_name_expr);
+
+        qb.push(patient_name_select).push(" AS patient_name, ");
+        qb.push(patient_id_select).push(" AS patient_id, ");
+        qb.push(patient_sex_select).push(" AS patient_sex, ");
+        qb.push(patient_birthdate_select).push(" AS patient_birthdate, ");
+        qb.push(study_date_select).push(" AS study_date, ");
+        qb.push(study_time_select).push(" AS study_time, ");
+        qb.push(study_description_select).push(" AS study_description, ");
+        qb.push(accession_no_select).push(" AS accession_no, ");
+        qb.push(num_instances_select).push(" AS num_instances, ");
+        qb.push(modalities_select).push(" AS modalities, ");
+        qb.push(institution_name_select).push(" AS institution_name, ");
+        qb.push("NULL AS study_attrs, ");
 
         qb.push(
               "study.study_iuid AS study_instance_uid,
@@ -236,29 +262,27 @@ impl StudyRepository for Dcm4chee2183MySqlStudyRepository {
                instance.sop_iuid AS sop_instance_uid, ",
         );
 
-        if include_ohif_metadata {
-            qb.push(
-                "CAST(series.series_no AS CHAR) AS series_no,
-                 series.series_desc AS series_description,
-                 series.modality AS modality,
-                 CAST(DATE(series.updated_time) AS CHAR) AS series_updated_time,
-                 instance.pk AS instance_pk,
-                 CAST(instance.inst_no AS CHAR) AS inst_no,
-                 instance.sop_cuid AS sop_cuid,
-                 instance.inst_attrs AS inst_attrs,",
-            );
-        } else {
-            qb.push(
-                "NULL AS series_no,
-                 NULL AS series_description,
-                 NULL AS modality,
-                 NULL AS series_updated_time,
-                 NULL AS instance_pk,
-                 NULL AS inst_no,
-                 NULL AS sop_cuid,
-                 NULL AS inst_attrs,",
-            );
-        }
+        // ------------------------------------------------------------
+        // SELECT: Series + Instance columns
+        // ------------------------------------------------------------
+        let series_no_select = select_non_none(metadata_mode, "CAST(series.series_no AS CHAR)");
+        let series_description_select = select_non_none(metadata_mode, "series.series_desc");
+        let modality_select = select_non_none(metadata_mode, "series.modality");
+        let series_updated_time_select =
+            select_ohif_only(metadata_mode, "CAST(DATE(series.updated_time) AS CHAR)");
+        let instance_pk_select = select_ohif_only(metadata_mode, "instance.pk");
+        let inst_no_select = select_non_none(metadata_mode, "CAST(instance.inst_no AS CHAR)");
+        let sop_cuid_select = select_ohif_only(metadata_mode, "instance.sop_cuid");
+        let inst_attrs_select = select_ohif_only(metadata_mode, "instance.inst_attrs");
+
+        qb.push(series_no_select).push(" AS series_no, ");
+        qb.push(series_description_select).push(" AS series_description, ");
+        qb.push(modality_select).push(" AS modality, ");
+        qb.push(series_updated_time_select).push(" AS series_updated_time, ");
+        qb.push(instance_pk_select).push(" AS instance_pk, ");
+        qb.push(inst_no_select).push(" AS inst_no, ");
+        qb.push(sop_cuid_select).push(" AS sop_cuid, ");
+        qb.push(inst_attrs_select).push(" AS inst_attrs, ");
 
         if include_filesystem {
             // Always select the raw file reference columns; Rust will use them only
