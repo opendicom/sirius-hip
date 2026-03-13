@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use dicom_encoding::TransferSyntaxIndex;
 use dicom_object::InMemDicomObject;
 use dicom_transfer_syntax_registry::TransferSyntaxRegistry;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use crate::api::study_token::params::StudyTokenParams;
 use crate::auth::{self, AuthClaims};
@@ -57,8 +57,57 @@ pub enum StudyTokenOutput {
     Xml(String),
     Zip {
         filename: String,
-        zip: crate::models::dicomzip::DicomStreamZip,
+        zip: crate::src2::dicomzip::DicomStreamZip,
     },
+}
+
+/// Minimal, typed representation of a WADO-URI request.
+///
+/// We keep this as structured data in the plan to:
+/// - avoid allocating long WADO URLs for every instance up-front;
+/// - enable late-bound rendering (only build the string when needed);
+/// - reuse the same data for filesystem fallback.
+#[derive(Debug, Clone)]
+struct WadoRef {
+    study_uid: String,
+    series_uid: String,
+    instance_uid: String,
+}
+
+impl WadoRef {
+    fn from_row(row: &crate::src2::pacs::read_models::StudyTokenRow) -> Self {
+        Self {
+            study_uid: row.study_instance_uid.clone(),
+            series_uid: row.series_instance_uid.clone(),
+            instance_uid: row.sop_instance_uid.clone(),
+        }
+    }
+
+    fn to_url(&self, settings: &Settings) -> String {
+        build_wado_url_from_uids(
+            settings,
+            &self.study_uid,
+            &self.series_uid,
+            &self.instance_uid,
+        )
+    }
+}
+
+/// Typed ZIP entry source planning.
+///
+/// This is intentionally **not** a URL string.
+/// Filesystem paths are represented as `PathBuf` (cheap, no parsing).
+/// WADO sources are represented as `WadoRef` so we can build URLs lazily.
+#[derive(Debug, Clone)]
+enum ZipSourcePlan {
+    /// Prefer filesystem reads, but if the file is missing at streaming time,
+    /// fallback to WADO.
+    FilesystemPreferred {
+        path: PathBuf,
+        wado_fallback: WadoRef,
+    },
+    /// Always use WADO.
+    Wado(WadoRef),
 }
 
 /// Intermediate **request plan** for building a `/studyToken` response.
@@ -93,7 +142,7 @@ struct StudyTokenPlan {
     retrieve_urls: Vec<String>,
     // Sources suitable for ZIP building (file:// or http(s) WADO).
     // In OneTime mode this matches what was persisted for the session.
-    zip_sources: Vec<(String, String)>,
+    zip_sources: Vec<ZipSourcePlan>,
 }
 
 
@@ -124,7 +173,9 @@ struct OhifPresenter {
 struct WeasisPresenter {
     settings: Arc<Settings>,
 }
-struct ZipPresenter;
+struct ZipPresenter {
+    settings: Arc<Settings>,
+}
 
 
 // -------------------------------------------------------------------------------- //
@@ -803,12 +854,23 @@ impl StudyTokenPresenter for WeasisPresenter {
 #[async_trait(?Send)]
 impl StudyTokenPresenter for ZipPresenter {
     async fn render(&self, plan: StudyTokenPlan) -> Result<StudyTokenOutput, AppError> {
-        let mut zip = crate::models::dicomzip::DicomStreamZip::new();
+        let mut zip = crate::src2::dicomzip::DicomStreamZip::new();
 
         // Name files deterministically. Keep it simple: 0001.dcm, 0002.dcm, ...
-        for (idx, (_instance_uid, source_url)) in plan.zip_sources.iter().enumerate() {
+        for (idx, source) in plan.zip_sources.iter().enumerate() {
             let name = format!("{:04}.dcm", idx + 1);
-            zip.add_entry(&name, source_url);
+            match source {
+                ZipSourcePlan::Wado(w) => {
+                    zip.add_http_entry(&name, w.to_url(self.settings.as_ref()));
+                }
+                ZipSourcePlan::FilesystemPreferred { path, wado_fallback } => {
+                    zip.add_filesystem_entry_with_http_fallback(
+                        &name,
+                        path.clone(),
+                        wado_fallback.to_url(self.settings.as_ref()),
+                    );
+                }
+            }
         }
 
         Ok(StudyTokenOutput::Zip {
@@ -850,11 +912,34 @@ fn build_wado_url(settings: &Settings, row: &crate::src2::pacs::read_models::Stu
     )
 }
 
+fn build_wado_url_from_uids(
+    settings: &Settings,
+    study_uid: &str,
+    series_uid: &str,
+    instance_uid: &str,
+) -> String {
+    format!(
+        "{}?requestType=WADO&studyUID={}&seriesUID={}&objectUID={}&contentType=application/dicom&transferSyntax={}",
+        settings.dicomarchive.wadouri,
+        study_uid,
+        series_uid,
+        instance_uid,
+        settings.dicomarchive.transfer_syntax,
+    )
+}
+
 /// Build absolute filesystem path for given instance row
 /// Returns None if filesystem_fk or relative_file_path are missing
-fn build_absolute_filesystem_path(settings: &Settings, row: &crate::src2::pacs::read_models::StudyTokenRow) -> Option<String> {
+fn build_absolute_filesystem_path(
+    settings: &Settings,
+    row: &crate::src2::pacs::read_models::StudyTokenRow,
+) -> Option<PathBuf> {
     let fs_id = row.filesystem_fk?;
     let rel = row.relative_file_path.as_deref()?;
+    build_absolute_filesystem_path_by_id(settings, fs_id, rel)
+}
+
+fn build_absolute_filesystem_path_by_id(settings: &Settings, fs_id: i32, rel: &str) -> Option<PathBuf> {
     let base = settings.dicomarchive.get_fs_path_by_id(fs_id)?;
 
     let rel_path = Path::new(rel);
@@ -868,7 +953,7 @@ fn build_absolute_filesystem_path(settings: &Settings, row: &crate::src2::pacs::
         }
     }
 
-    Path::new(base).join(rel_path).to_str().map(|s| s.to_string())
+    Some(Path::new(base).join(rel_path))
 }
 
 // endregion: === HELPERS FUNCTIONS ======================================================== //
@@ -1137,66 +1222,70 @@ pub async fn execute_study_token(
                 persisted_files
                     .iter()
                     .map(|f| {
+                        let wado = WadoRef {
+                            study_uid: f.study_uid.clone(),
+                            series_uid: f.series_uid.clone(),
+                            instance_uid: f.instance_uid.clone(),
+                        };
+
+                        // If the session indicates this file should be served via filesystem, prefer that but include WADO fallback.
                         let src = if f.use_wado {
-                            format!(
-                                "{}?requestType=WADO&studyUID={}&seriesUID={}&objectUID={}&contentType=application/dicom&transferSyntax={}",
-                                settings.dicomarchive.wadouri,
-                                f.study_uid,
-                                f.series_uid,
-                                f.instance_uid,
-                                settings.dicomarchive.transfer_syntax,
-                            )
+                            ZipSourcePlan::Wado(wado)
                         } else {
                             match (f.filesystem_fk, f.relative_file_path.as_deref()) {
                                 (Some(fs_id), Some(rel)) => {
-                                    if let Some(base) = settings.dicomarchive.get_fs_path_by_id(fs_id) {
-                                        format!(
-                                            "file://{}/{}",
-                                            base.trim_end_matches('/'),
-                                            rel.trim_start_matches('/')
-                                        )
+                                    if let Some(path) = build_absolute_filesystem_path_by_id(
+                                        settings.as_ref(),
+                                        fs_id,
+                                        rel,
+                                    ) {
+                                        ZipSourcePlan::FilesystemPreferred {
+                                            path,
+                                            wado_fallback: wado,
+                                        }
                                     } else {
-                                        format!(
-                                            "{}?requestType=WADO&studyUID={}&seriesUID={}&objectUID={}&contentType=application/dicom&transferSyntax={}",
-                                            settings.dicomarchive.wadouri,
-                                            f.study_uid,
-                                            f.series_uid,
-                                            f.instance_uid,
-                                            settings.dicomarchive.transfer_syntax,
-                                        )
+                                        ZipSourcePlan::Wado(wado)
                                     }
                                 }
-                                _ => format!(
-                                    "{}?requestType=WADO&studyUID={}&seriesUID={}&objectUID={}&contentType=application/dicom&transferSyntax={}",
-                                    settings.dicomarchive.wadouri,
-                                    f.study_uid,
-                                    f.series_uid,
-                                    f.instance_uid,
-                                    settings.dicomarchive.transfer_syntax,
-                                ),
+                                _ => ZipSourcePlan::Wado(wado),
                             }
                         };
-                        (f.instance_uid.clone(), src)
+
+                        src
                     })
                     .collect::<Vec<_>>()
             } else {
                 // ZIP without session: choose best source per row.
                 rows.iter()
                     .map(|r| {
+                        let wado = WadoRef::from_row(r);
+
                         let src = if r.use_filesystem {
                             build_absolute_filesystem_path(settings.as_ref(), r)
-                                .map(|p| format!("file://{p}"))
-                                .unwrap_or_else(|| build_wado_url(settings.as_ref(), r))
+                                .map(|p| ZipSourcePlan::FilesystemPreferred {
+                                    path: p,
+                                    wado_fallback: wado.clone(),
+                                })
+                                .unwrap_or_else(|| ZipSourcePlan::Wado(wado))
                         } else {
-                            build_wado_url(settings.as_ref(), r)
+                            ZipSourcePlan::Wado(wado)
                         };
-                        (r.sop_instance_uid.clone(), src)
+
+                        src
                     })
                     .collect::<Vec<_>>()
             }
         } else {
             // Non-ZIP presenters never use ZIP sources.
             Vec::new()
+        };
+
+        // ZIP responses do not need the full PACS rows after `zip_sources` are computed.
+        // Drop them early to reduce peak memory on large studies.
+        let rows = if matches!(access_type, AccessType::Zip) {
+            Vec::new()
+        } else {
+            rows
         };
 
         let plan = StudyTokenPlan {
@@ -1218,7 +1307,12 @@ pub async fn execute_study_token(
         }
 
         let output = match plan.access_type {
-            AccessType::Zip => ZipPresenter.render(plan).await?,
+            AccessType::Zip => {
+                let presenter = ZipPresenter {
+                    settings: settings.clone(),
+                };
+                presenter.render(plan).await?
+            }
             AccessType::Weasis => {
                 let presenter = WeasisPresenter {
                     settings: settings.clone(),

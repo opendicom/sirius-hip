@@ -49,4 +49,10 @@ futures = "0.3"
 async-stream = "0.3.3"
 async-trait = "0.1.89"
 
+async_zip = { version = "0.0.18", features = ["tokio"] }
+
 sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+zip = "0.6"

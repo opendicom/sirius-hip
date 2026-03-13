@@ -62,12 +62,15 @@ pub async fn study_token_handler(
         StudyTokenOutput::Xml(xml) => HttpResponse::Ok()
             .content_type("application/xml; charset=utf-8")
             .body(xml),
-        StudyTokenOutput::Zip { filename, zip } => HttpResponse::Ok()
+        StudyTokenOutput::Zip { filename, mut zip } => {
+            zip.set_http_client(state.http_client.clone());
+            HttpResponse::Ok()
             .content_type("application/zip")
             .append_header((
                 "Content-Disposition",
                 format!("attachment; filename=\"{}\"", filename),
             ))
-            .streaming(zip.build()),
+            .streaming(zip.build())
+        }
     })
 }

@@ -17,7 +17,6 @@ use crate::{api::study_token::params::StudyTokenParams,
             settings::Settings, 
             models::weasis, 
             models::ohif,
-            models::dicomzip,
             models::cornerstone};
 
 mod dcm4chee440;
@@ -73,25 +72,6 @@ pub async fn get_ohif_studies(
         DBVersion::dcm4chee440 =>  dcm4chee440::ohif::get_studies(pool, params, settings, server_base_url).await,
     }    
 }
-
-
-// --------------------------------------------------------- //
-// -- DICOMZIP static database module dispatcher ----------- //
-// --------------------------------------------------------- //
-
-/// Dispatch query based on `settings.version.version` value
-pub async fn get_dicomzip_studies(
-    pool: &MySqlPool, 
-    params: &StudyTokenParams, 
-    settings: &Settings)
-    -> anyhow::Result<dicomzip::Studies> 
-{
-    match settings.dicomarchive.version {
-        DBVersion::dcm4chee2183 => dcm4chee2183::dicomzip::get_studies(pool, params, settings).await,
-        DBVersion::dcm4chee440 =>  dcm4chee440::dicomzip::get_studies(pool, params, settings).await,
-    }    
-}
-
 
 
 // --------------------------------------------------------- //
