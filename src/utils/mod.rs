@@ -24,12 +24,5 @@ where
     s.serialize_str("******* (password hidden)")
 }
 
-/// Hide password in a database URL string
-/// .g. mysql://user:password@host/db  -> mysql://user:xxxxxxx@host/db
-/// Used for logging purposes
-pub fn db_url_hide_password(url: &str) -> String {
-    let re = Regex::new(r"(mysql://.*:).*(@.*)").unwrap();
-    re.replace(url, "${1}xxxxxxx${2}").to_string()
-}
 
 

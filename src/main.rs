@@ -1,4 +1,4 @@
-use actix_web::{App, HttpResponse, HttpServer, guard, middleware, web};
+use actix_web::{App, HttpResponse, HttpServer, middleware, web};
 use actix_web::ResponseError;
 use actix_web::middleware::Logger;
 use actix_cors::Cors;
@@ -19,19 +19,21 @@ use std::time::Duration;
 
 use crate::settings::Settings;
 use crate::constants::QIDO_STUDY_INCLUDEFIELD_DIC;
-use crate::src2::pacs::repositories::factory::StudyRepositoryFactory;
-use crate::src2::state2::{AppState2, PacsState2};
-use crate::src2::errors::app_error::AppError;
+use crate::pacs::repositories::factory::StudyRepositoryFactory;
+use crate::state2::{AppState2, PacsState2};
+use crate::errors::app_error::AppError;
 
 mod settings;
-mod error;
 mod constants;
 mod auth;
-mod persistence;
 mod utils;
-mod state;
-
-mod src2;
+mod pacs;
+mod errors;
+mod api;
+mod state2;
+mod application;
+mod init;
+mod dicomzip;
 
 
 #[actix_web::main]
@@ -151,7 +153,7 @@ async fn run() -> anyhow::Result<()> {
         .context("Failed to create Database Study Repository")?;
 
 
-    let download_session_repo = crate::src2::init::init_download_session_repo(&settings)
+    let download_session_repo = crate::init::init_download_session_repo(&settings)
         .await
         .context("Failed to create Database Download Session Repository")?;
 
@@ -237,7 +239,7 @@ async fn run() -> anyhow::Result<()> {
                 sets.cors_whitelist.iter().any(|value| value.as_bytes() == origin.as_bytes())
             });
 
-        let mut app = App::new()
+        let app = App::new()
             .wrap(cors)
             .wrap(Logger::new(
                 "%a \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" %T %{X-Error-Id}o",
@@ -245,15 +247,15 @@ async fn run() -> anyhow::Result<()> {
             //.wrap(Logger::new("%a %{User-Agent}i"))
             .wrap(middleware::Compress::default())
             .app_data(app_state.clone())
-            .route("/echo", web::get().to(src2::api::echo_handler))
-            .route("/settings", web::get().to(src2::api::settings_handler))
+            .route("/echo", web::get().to(api::echo_handler))
+            .route("/settings", web::get().to(api::settings_handler))
 
             // Download endpoint.
             // - JwtAuthMethod::OneTime: denies re-downloads (bitset enforcement)
             // - JwtAuthMethod::{Standard,None}: streams/proxies without one-time enforcement
             .route(
                 "/files/{session_id}/{file_index}",
-                web::get().to(src2::api::download_file_handler),
+                web::get().to(api::download_file_handler),
             )
 
             .service(web::scope("/studyToken")
@@ -267,12 +269,12 @@ async fn run() -> anyhow::Result<()> {
                     .into()
                 }))
                 .service(web::resource("")
-                    .route(actix_web::web::get().to(src2::api::study_token_handler)))
+                    .route(actix_web::web::get().to(api::study_token_handler)))
             )
             
            
             // -- WADO PROXY------------------------------------------------------------------------------------ //
-            .route("/wado", web::get().to(src2::api::wado_handler))
+            .route("/wado", web::get().to(api::wado_handler))
             
 
             // -- QIDO ------------------------------------------------------------------------------------------ //
@@ -281,7 +283,7 @@ async fn run() -> anyhow::Result<()> {
                 .service(
                     web::resource("/studies")
                         .app_data(qido_qs.clone())
-                        .route(web::get().to(src2::api::qido_studies_handler))
+                        .route(web::get().to(api::qido_studies_handler))
                 )
                 // SearchForSeries
                 .service(
