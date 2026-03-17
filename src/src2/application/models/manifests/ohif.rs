@@ -1,20 +1,17 @@
 use serde::Serialize;
-use sqlx::MySqlPool;
-
-use crate::{settings::Settings, api::study_token::params::StudyTokenParams, database};
 
 // --------------------------------------------------------------------- //
 // -- OHIF Model
 // --------------------------------------------------------------------- //
 
 #[derive(Serialize, Debug)]
-pub struct Studies {
-    pub studies: Box<Vec<Study>>
+pub struct OhifStudies {
+    pub studies: Box<Vec<OhifStudy>>
 }
 
 /// OHIF Study Model
 #[derive(Serialize, Debug)]
-pub struct  Study {
+pub struct  OhifStudy {
     #[serde(skip)]
     pub study_pk: i32,
     
@@ -61,14 +58,14 @@ pub struct  Study {
     #[serde(rename="InstitutionName")]
     pub institution_name: Option<String>,
 
-    pub series: Vec<Serie>,
+    pub series: Vec<OhifSerie>,
 }
-impl PartialEq for Study {
+impl PartialEq for OhifStudy {
     fn eq(&self, other: &Self) -> bool {
         self.study_pk == other.study_pk //&& self.study_iuid == other.study_iuid
     }
 }
-impl PartialEq<i32> for Study {
+impl PartialEq<i32> for OhifStudy {
     fn eq(&self, pk: &i32) -> bool {
         self.study_pk.eq(pk)
     }
@@ -76,7 +73,7 @@ impl PartialEq<i32> for Study {
 
 /// OHIF Series Model
 #[derive(Serialize, Debug)]
-pub struct Serie {
+pub struct OhifSerie {
     #[serde(skip)]
     pub serie_pk: i32,
 
@@ -95,32 +92,32 @@ pub struct Serie {
     #[serde(rename="SeriesDescription")]               
     pub series_description: Option<String>,  
 
-    pub instances: Vec<Instance>,
+    pub instances: Vec<OhifInstance>,
 }
-impl PartialEq for Serie {
+impl PartialEq for OhifSerie {
     fn eq(&self, other: &Self) -> bool {
         self.serie_pk == other.serie_pk //&& self.series_iuid == other.series_iuid 
     }
 }
-impl PartialEq<i32> for Serie {
+impl PartialEq<i32> for OhifSerie {
     fn eq(&self, pk: &i32) -> bool {
         self.serie_pk.eq(pk)
     }
 }
 
 #[derive(Serialize, Debug)]
-pub struct Instance {
+pub struct OhifInstance {
     #[serde(skip)]
     pub instance_pk: i32,
-    pub metadata: InstanceMetadata,
+    pub metadata: OhifInstanceMetadata,
     pub url: String,
 }
-impl PartialEq for Instance {
+impl PartialEq for OhifInstance {
     fn eq(&self, other: &Self) -> bool {
         self.instance_pk == other.instance_pk //&& self.sop_iuid == other.sop_iuid
     }
 }
-impl PartialEq<i32> for Instance {
+impl PartialEq<i32> for OhifInstance {
     fn eq(&self, pk: &i32) -> bool {
         self.instance_pk.eq(pk)
     }
@@ -128,7 +125,7 @@ impl PartialEq<i32> for Instance {
 
 /// OHIF Instance Metadata Model
 #[derive(Serialize, Debug)]
-pub struct InstanceMetadata {
+pub struct OhifInstanceMetadata {
 
     /// Mandatory DICOM attribute
     #[serde(rename="SOPInstanceUID")]
@@ -270,21 +267,4 @@ pub struct InstanceMetadata {
     
 
 
-}
-
-
-
-
-// --------------------------------------------------------------------- //
-// -- Weasis main function
-// --------------------------------------------------------------------- //
-
-pub async fn build_manifest(
-    pool: &MySqlPool, 
-    params: &StudyTokenParams, 
-    settings: &Settings, 
-    server_base_url: String) 
-    -> anyhow::Result<Studies> 
-{
-    Ok(database::get_ohif_studies(pool, params, settings,server_base_url).await?)   
 }

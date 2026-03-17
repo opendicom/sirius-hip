@@ -1,4 +1,4 @@
-use actix_web::{web, App, HttpServer, middleware, guard,};
+use actix_web::{App, HttpResponse, HttpServer, guard, middleware, web};
 use actix_web::ResponseError;
 use actix_web::middleware::Logger;
 use actix_cors::Cors;
@@ -24,11 +24,8 @@ use crate::src2::state2::{AppState2, PacsState2};
 use crate::src2::errors::app_error::AppError;
 
 mod settings;
-mod api;
 mod error;
 mod constants;
-mod models;
-mod database;
 mod auth;
 mod persistence;
 mod utils;
@@ -248,8 +245,8 @@ async fn run() -> anyhow::Result<()> {
             //.wrap(Logger::new("%a %{User-Agent}i"))
             .wrap(middleware::Compress::default())
             .app_data(app_state.clone())
-            .route("/echo", web::get().to(api::echo::endpoint))
-            .route("/settings", web::get().to(api::setting::endpoint))
+            .route("/echo", web::get().to(src2::api::echo_handler))
+            .route("/settings", web::get().to(src2::api::settings_handler))
 
             // Download endpoint.
             // - JwtAuthMethod::OneTime: denies re-downloads (bitset enforcement)
@@ -284,58 +281,36 @@ async fn run() -> anyhow::Result<()> {
                 .service(
                     web::resource("/studies")
                         .app_data(qido_qs.clone())
-                        .guard(guard::Header("content-type","application/json"))
                         .route(web::get().to(src2::api::qido_studies_handler))
                 )
                 // SearchForSeries
                 .service(
                     web::resource("/studies/{StudyInstanceUID}/series")
                         .app_data(qido_qs.clone())
-                        .guard(guard::Header("content-type","application/json"))
-                        .route(web::get().to(api::qido::series))
+                        .route(web::get().to(|| async { HttpResponse::NotImplemented().finish() }))
                 )
                 .service(
                     web::resource("/series")
                         .app_data(qido_qs.clone())
-                        .guard(guard::Header("content-type","application/json"))
-                        .route(web::get().to(api::qido::series))
+                        .route(web::get().to(|| async { HttpResponse::NotImplemented().finish() }))
                 )
                 // SearchForInstances
                 .service(
                     web::resource("/studies/{StudyInstanceUID}/series/{SeriesInstanceUID}/instances")
                         .app_data(qido_qs.clone())
-                        .guard(guard::Header("content-type","application/json"))
-                        .route(web::get().to(api::qido::instances))
+                        .route(web::get().to(|| async { HttpResponse::NotImplemented().finish() }))
                 )
                 .service(
                     web::resource("/studies/{StudyInstanceUID}/instances")
                         .app_data(qido_qs.clone())
-                        .guard(guard::Header("content-type","application/json"))
-                        .route(web::get().to(api::qido::instances))
+                        .route(web::get().to(|| async { HttpResponse::NotImplemented().finish() }))
                 )
                 .service(
                     web::resource("/instances")
                         .app_data(qido_qs.clone())
-                        .guard(guard::Header("content-type","application/json"))
-                        .route(web::get().to(api::qido::instances))
+                        .route(web::get().to(|| async { HttpResponse::NotImplemented().finish() }))
                 ) 
             );
-
-            if settings.dicomarchive.custodianoid.is_some() {
-                app = app.service(
-                web::scope("/custodians")
-                        .service(api::settings::oids)
-                        .service(api::settings::aeis)
-                );
-            }
-            if settings.dicomarchive.custodianoid.is_some() {
-                app = app.service(
-                    web::scope("/pacs")
-                        .service(api::settings::wadouri)
-                        .service(api::settings::stow)
-                        .service(api::settings::qido)
-                );
-            }
             app
     })
     .bind(bind)

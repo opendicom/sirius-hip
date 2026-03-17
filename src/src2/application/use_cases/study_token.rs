@@ -10,9 +10,9 @@ use dicom_object::InMemDicomObject;
 use dicom_transfer_syntax_registry::TransferSyntaxRegistry;
 use std::path::{Component, Path, PathBuf};
 
-use crate::api::study_token::params::StudyTokenParams;
 use crate::auth::{self, AuthClaims};
 use crate::settings::{JwtAuthMethod, Settings};
+use crate::src2::api::StudyTokenParams;
 use crate::src2::errors::app_error::AppError;
 use crate::src2::pacs::repositories::study_repository::{StudyRepository, StudyTokenSearchCriteria};
 use crate::src2::application::models::{
@@ -21,6 +21,7 @@ use crate::src2::application::models::{
 };
 
 use crate::src2::application::repositories::download_session_repository::DownloadSessionRepository;
+use crate::utils;
 
 
 
@@ -184,7 +185,7 @@ struct ZipPresenter {
 #[async_trait(?Send)]
 impl StudyTokenPresenter for OhifPresenter {
     async fn render(&self, plan: StudyTokenPlan) -> Result<StudyTokenOutput, AppError> {
-        use crate::models::ohif::{Instance, InstanceMetadata, Serie, Studies, Study};
+        use crate::src2::application::models::manifests::ohif::{OhifInstance, OhifInstanceMetadata, OhifSerie, OhifStudy, OhifStudies};
 
         // Precompute URL constant pieces for this request.
         let wado_fallback = if plan.base_url.is_empty() {
@@ -412,11 +413,11 @@ impl StudyTokenPresenter for OhifPresenter {
         }
 
         // Build by single pass over ordered rows: study -> series -> instances.
-        let mut out: Vec<Study> = Vec::new();
+        let mut out: Vec<OhifStudy> = Vec::new();
         let mut current_study_iuid: Option<&str> = None;
         let mut current_series_iuid: Option<&str> = None;
-        let mut current_study: Option<Study> = None;
-        let mut current_series: Option<Serie> = None;
+        let mut current_study: Option<OhifStudy> = None;
+        let mut current_series: Option<OhifSerie> = None;
 
         // -------------------------------------------------------------- //
 
@@ -439,7 +440,7 @@ impl StudyTokenPresenter for OhifPresenter {
                 let patient_age = row
                     .patient_birthdate
                     .clone()
-                    .map(crate::database::helpers::calculate_age)
+                    .map(utils::calculate_age)
                     .transpose()
                     .map_err(|e| AppError::Internal(e.into()))?
                     .map(|age| age.to_string());
@@ -470,7 +471,7 @@ impl StudyTokenPresenter for OhifPresenter {
                             .filter(|s| !s.is_empty())
                     });
 
-                current_study = Some(Study {
+                current_study = Some(OhifStudy {
                     study_pk: 0,
                     study_iuid: row.study_instance_uid.clone(),
                     study_date: row
@@ -511,7 +512,7 @@ impl StudyTokenPresenter for OhifPresenter {
                     .context("Failed to parse series_no to integer")
                     .map_err(|e| AppError::Internal(e.into()))?;
 
-                current_series = Some(Serie {
+                current_series = Some(OhifSerie {
                     serie_pk: 0,
                     series_iuid: row.series_instance_uid.clone(),
                     series_no,
@@ -594,9 +595,9 @@ impl StudyTokenPresenter for OhifPresenter {
                 .unwrap_or_default();
 
             if let Some(serie) = current_series.as_mut() {
-                serie.instances.push(Instance {
+                serie.instances.push(OhifInstance {
                     instance_pk,
-                    metadata: InstanceMetadata {
+                    metadata: OhifInstanceMetadata {
                         instance_no: inst_no,
                         instance_sop_cuid: sop_cuid,
                         series_modality,
@@ -639,7 +640,7 @@ impl StudyTokenPresenter for OhifPresenter {
             out.push(study);
         }
 
-        let manifest = Studies {
+        let manifest = OhifStudies {
             studies: Box::new(out),
         };
 

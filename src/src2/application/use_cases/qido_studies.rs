@@ -7,11 +7,11 @@ use dicom_json::DicomJson;
 use dicom_object::InMemDicomObject;
 use log::error;
 
-use crate::api::qido::QidoStudiesParams;
 use crate::auth::{self, AuthClaims};
 use crate::constants::QIDO_STUDY_INCLUDEFIELD_DIC;
-use crate::models::qido::Qido;
+use crate::src2::application::models::qido::Qido;
 use crate::settings::{JwtAuthMethod, Settings};
+use crate::src2::api::QidoStudiesParams;
 use crate::src2::application::repositories::DownloadSessionRepository;
 use crate::src2::errors::app_error::AppError;
 use crate::src2::pacs::repositories::StudyRepository;

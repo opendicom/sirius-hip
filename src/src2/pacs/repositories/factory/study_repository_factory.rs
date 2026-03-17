@@ -5,10 +5,8 @@ use sqlx::postgres::PgPoolOptions;
 
 use chrono::NaiveDateTime;
 
-use crate::settings::Settings;
-use crate::database::DBVersion;
+use crate::settings::{DBVersion, Settings};
 use crate::src2::errors::PacsError;
-
 use crate::src2::pacs::repositories::StudyRepository;
 use crate::src2::pacs::infrastructure::dcm4chee2183::{
     mysql::Dcm4chee2183MySqlStudyRepository,

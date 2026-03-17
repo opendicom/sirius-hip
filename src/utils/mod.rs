@@ -1,6 +1,9 @@
 use regex::Regex;
 use serde::{ser::Error, Serializer};
 
+mod patient;
+pub use patient::calculate_age;
+
 
 /// Serialize a URL hiding the password part
 pub fn url_password_hidden<S>(url: &str, s: S) -> Result<S::Ok, S::Error>

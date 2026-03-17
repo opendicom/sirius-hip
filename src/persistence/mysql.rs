@@ -2,8 +2,7 @@ use anyhow::Ok;
 use async_trait::async_trait;
 use sqlx::MySqlPool;
 
-use crate::{database::DBVersion};
-
+use crate::settings::DBVersion;
 use super::JwtRepository;
 
 pub struct MySqlJwtRepository {

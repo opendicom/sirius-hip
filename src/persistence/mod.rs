@@ -3,8 +3,7 @@ use anyhow::Context;
 use reqwest::Url;
 use async_trait::async_trait;
 
-use crate::{persistence::mysql::MySqlJwtRepository, utils::db_url_hide_password};
-use crate::database::DBVersion;
+use crate::{persistence::mysql::MySqlJwtRepository, settings::DBVersion, utils::db_url_hide_password};
 
 mod mysql;
 

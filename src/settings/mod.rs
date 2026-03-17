@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-
 use chrono::{NaiveDate, NaiveDateTime};
 
-use crate::database::DBVersion;
+mod db_versions;
+pub use db_versions::DBVersion;
+
 use crate::utils::{url_password_hidden, password_hidden};
 
 mod naive_datetime_opt_serde {
