@@ -1,5 +1,29 @@
 {
     "rust-analyzer.linkedProjects": [
         "./Cargo.toml"
-    ]
+    ],
+    "rust-analyzer.numThreads": 6,
+    "rust-analyzer.cachePriming.enable": false,
+    "rust-analyzer.cargo.allTargets": false,
+    "rust-analyzer.checkOnSave": true,
+    "rust-analyzer.check.command": "check",
+    // "rust-analyzer.check.workspace": false,
+    // "rust-analyzer.check.allTargets": false,
+    "rust-analyzer.procMacro.processes": 1,
+    "rust-analyzer.files.exclude": [
+        "target",
+        "docker/service_pacs"
+    ],
+    "files.exclude": {
+        "**/target": true,
+        "**/docker/service_pacs": true
+    },
+    "files.watcherExclude": {
+        "**/target/**": true,
+        "**/docker/service_pacs/**": true
+    },
+    "search.exclude": {
+        "**/target/**": true,
+        "**/docker/service_pacs/**": true
+    }
 }

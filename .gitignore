@@ -1,7 +1,5 @@
 target
 /sirius-hip.dev*.toml
 /sirius-hip.dev440.toml
-docker/service_pacs/database/data
-docker/service_pacs/default
-docker/service_pacs/archive
+docker/service_pacs*
 dist

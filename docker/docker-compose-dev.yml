@@ -1,34 +1,44 @@
 services:
-  opendicom_pacs_db:
-    container_name: opendicom_pacs_db
+
+  # -- PACS 1 -------------------------------------------------------- #
+  opendicom_pacs1_db:
+    container_name: opendicom_pacs1_db
     image: mysql:5.7
-    env_file:
-      - ./docker-compose.dev.env
+    environment:
+       - MYSQL_ROOT_PASSWORD=root
+       - MYSQL_DATABASE=pacsdb1
+       - MYSQL_USER=pacs1
+       - MYSQL_PASSWORD=pacs1
     restart: unless-stopped
     volumes:
-        - ./service_pacs/database/data:/var/lib/mysql
-        - ./service_pacs/database/entrypoint:/docker-entrypoint-initdb.d/
-        - ./service_pacs/database/conf:/etc/mysql/conf.d
+        - ./service_pacs1/database/data:/var/lib/mysql
+        - ./service_pacs1/database/entrypoint:/docker-entrypoint-initdb.d/
+        - ./service_pacs1/database/conf:/etc/mysql/conf.d
     ports:
-      - 0.0.0.0:3306:3306
+      - 0.0.0.0:13306:3306
     networks:
       - opendicom_net
 
-  opendicom_pacs:
-    container_name: opendicom_pacs
+  opendicom_pacs1:
+    container_name: opendicom_pacs1
     image: opendicom/dcm4chee:latest
-    env_file:
-      - ./docker-compose.dev.env
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=pacsdb1
+      - MYSQL_USER=pacs1
+      - MYSQL_PASSWORD=pacs1
+      - MYSQL_HOST=opendicom_pacs1_db
+      - MYSQL_PORT=3306
     restart: unless-stopped
     depends_on:
-      - opendicom_pacs_db
+      - opendicom_pacs1_db
     volumes:
-      - ./service_pacs/default/:/opt/dcm4chee/server/default/
-      - ./service_pacs/archive/:/archive/
+      - ./service_pacs1/default/:/opt/dcm4chee/server/default/
+      - ./service_pacs1/archive/:/archive/
     ports:
-      - 0.0.0.0:8080:8080
+      - 0.0.0.0:18080:8080
       - 0.0.0.0:11112:11112
-      - 0.0.0.0:2575:2575
+      - 0.0.0.0:12575:2575
     logging:
       driver: json-file
       options:
@@ -37,15 +47,63 @@ services:
     networks:
       - opendicom_net
 
-  opendicom_ohif:
-    image: ohif/app:v3.11.0
-    container_name: opendicom_ohif
-    depends_on:
-      - opendicom_pacs
+  # -- PACS 2 -------------------------------------------------------- #
+  opendicom_pacs2_db:
+    container_name: opendicom_pacs2_db
+    image: mysql:5.7
+    environment:
+       - MYSQL_ROOT_PASSWORD=root
+       - MYSQL_DATABASE=pacsdb2
+       - MYSQL_USER=pacs2
+       - MYSQL_PASSWORD=pacs2
+    restart: unless-stopped
     volumes:
-      - ./service_ohif/app-config.js:/usr/share/nginx/html/app-config.js
+        - ./service_pacs2/database/data:/var/lib/mysql
+        - ./service_pacs2/database/entrypoint:/docker-entrypoint-initdb.d/
+        - ./service_pacs2/database/conf:/etc/mysql/conf.d
     ports:
-      - 3000:80
+      - 0.0.0.0:23306:3306
+    networks:
+      - opendicom_net
+
+  opendicom_pacs2:
+    container_name: opendicom_pacs2
+    image: opendicom/dcm4chee:latest
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=pacsdb2
+      - MYSQL_USER=pacs2
+      - MYSQL_PASSWORD=pacs2
+      - MYSQL_HOST=opendicom_pacs2_db
+      - MYSQL_PORT=3306
+    restart: unless-stopped
+    depends_on:
+      - opendicom_pacs2_db
+    volumes:
+      - ./service_pacs2/default/:/opt/dcm4chee/server/default/
+      - ./service_pacs2/archive/:/archive/
+    ports:
+      - 0.0.0.0:28080:8080
+      - 0.0.0.0:21112:11112
+      - 0.0.0.0:22575:2575
+    logging:
+      driver: json-file
+      options:
+        max-size: 100k
+        max-file: "1"
+    networks:
+      - opendicom_net
+
+  # opendicom_ohif:
+  #   image: ohif/app:v3.11.0
+  #   container_name: opendicom_ohif
+  #   depends_on:
+  #     - opendicom_pacs1
+  #     - opendicom_pacs2
+  #   volumes:
+  #     - ./service_ohif/app-config.js:/usr/share/nginx/html/app-config.js
+  #   ports:
+  #     - 3000:80
   
   # opendicom_sirius_hip:
   #   container_name: opendicom_sirius_hip
@@ -53,7 +111,7 @@ services:
   #   env_file:
   #     - ./docker-compose.dev.env
   #   volumes:
-  #     - ./service_pacs/archive/:/DICOM/archive/
+  #     - ./service_pacs1/archive/:/DICOM/archive/
   #   ports:
   #     - 0.0.0.0:5001:5001
   #     - 0.0.0.0:5002:80

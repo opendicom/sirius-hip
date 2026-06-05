@@ -13,3 +13,6 @@ En linux luego es posible renombrar el nombre del archvio desde el "Gestor de Ar
 
 
 osirix://?methodName=downloadURL&URL='...'
+
+
+export RUST_LOG=debug && cargo-watch -w src -x 'run -- -c sirius-hip.dev.toml'
