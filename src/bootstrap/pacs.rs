@@ -1,35 +1,31 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
-use sqlx::mysql::MySqlPoolOptions;
+use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions};
 use thiserror::Error;
 use tracing::debug;
 
 use crate::{
     pacs::{
-        dcm4chee2183::{
+        MetadataProvider, PacsConnector, PacsRegistry, dcm4chee2183::{
+            Dcm4chee2183Connector,
+            Dcm4chee2183DicomWebMetadataProvider,
             Dcm4chee2183DicomWebObjectProvider,
             Dcm4chee2183FilesystemObjectProvider,
-            Dcm4chee2183MySqlConnector,
-        },
-        ObjectProvider,
-        PacsConnector,
-        PacsRegistry,
+            Dcm4chee2183MysqlMetadataProvider,
+            Dcm4chee2183PostgresMetadataProvider,
+        }
     },
     shared::config::{
         AppSettings,
+        DatabaseType,
+        DicomWebSettings,
+        FilesystemSettings,
         PacsConnectionSettings,
-        PacsFilesystemSettings,
         PacsKind,
-        PacsObjectMode,
         PacsSettings,
     },
 };
 
-
-// -- Bootstrap PACS Registry Error implementations -------------------------------------------------------------------------------------- //
-
-/// Errors that can occur during the building of the PACS registry, such as unsupported configurations or database 
-/// connection failures.
 #[derive(Debug, Error)]
 pub enum PacsRegistryBuildError {
     #[error("unsupported PACS config for id={pacs_id}, kind={kind}, connection={connection_type}")]
@@ -46,152 +42,148 @@ pub enum PacsRegistryBuildError {
         source: sqlx::Error,
     },
 
+    #[error("postgres connection failed for PACS id={pacs_id}")]
+    PostgresConnect {
+        pacs_id: String,
+        #[source]
+        source: sqlx::Error,
+    },
+
     #[error("invalid PACS config for id={pacs_id}: {reason}")]
     InvalidConfig {
         pacs_id: String,
         reason: String,
     },
-
 }
 
-fn build_filesystem_root_map(filesystems: &[PacsFilesystemSettings]) -> HashMap<i32, PathBuf> {
-    filesystems
-        .iter()
-        .map(|filesystem| (filesystem.id, PathBuf::from(&filesystem.path)))
-        .collect()
+fn build_filesystem_root_map(
+    filesystems: &[FilesystemSettings],
+    pacs_id: &str,
+) -> Result<HashMap<i32, PathBuf>, PacsRegistryBuildError> {
+    let mut by_id = HashMap::new();
+
+    for filesystem in filesystems {
+        let filesystem_id = i32::try_from(filesystem.id).map_err(|_| {
+            PacsRegistryBuildError::InvalidConfig {
+                pacs_id: pacs_id.to_string(),
+                reason: format!("filesystem id {} is out of i32 range", filesystem.id),
+            }
+        })?;
+
+        by_id.insert(filesystem_id, PathBuf::from(&filesystem.path));
+    }
+
+    Ok(by_id)
 }
 
+fn build_dicomweb_http_client(
+    settings: &DicomWebSettings,
+    pacs_id: &str,
+) -> Result<reqwest::Client, PacsRegistryBuildError> {
+    let max_connections = settings.max_connections.unwrap_or(10) as usize;
+    let timeout = Duration::from_secs(settings.timeout_seconds.unwrap_or(30));
 
-// -- Bootstrap PACS Registry implementations -------------------------------------------------------------------------------------- //
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(max_connections)
+        .timeout(timeout)
+        .build()
+        .map_err(|source| PacsRegistryBuildError::InvalidConfig {
+            pacs_id: pacs_id.to_string(),
+            reason: format!("failed to build dicomweb http client: {source}"),
+        })
+}
 
-/// Build the PACS Registry based on the provided application settings, constructing connectors for each configured PACS.
 pub async fn build_registry(
     settings: &AppSettings,
-) -> Result<Arc<PacsRegistry>, PacsRegistryBuildError>
-{
+) -> Result<Arc<PacsRegistry>, PacsRegistryBuildError> {
     let mut connectors = Vec::new();
 
     for pacs in &settings.pacs {
         connectors.push(create_connector(pacs).await?);
     }
 
-    Ok(
-        Arc::new(
-            PacsRegistry::new(
-                connectors
-            )
-        )
-    )
+    Ok(Arc::new(PacsRegistry::new(connectors)))
 }
 
-
-/// Factory function to create a PACS connector based on the provided configuration
 pub async fn create_connector(
     config: &PacsSettings,
-) -> Result<Arc<dyn PacsConnector>, PacsRegistryBuildError>
-{
-    debug!(id = %config.id, kind = %config.kind, r#type = %config.connection.type_name(), "Creating PACS Connector");
-    
-    match (&config.kind, &config.connection) {
+) -> Result<Arc<dyn PacsConnector>, PacsRegistryBuildError> {
+    debug!(
+        id = %config.id,
+        kind = %config.kind,
+        r#type = %config.connection.type_name(),
+        "Creating PACS connector"
+    );
 
+    match (&config.kind, &config.connection) {
         (
-            PacsKind::Dcm4chee2183, 
-            PacsConnectionSettings::Mysql {
-                url,
-                wadouri,
-                object_mode,
+            PacsKind::Dcm4chee2183,
+            PacsConnectionSettings::DatabaseFilesystem {
+                database,
                 filesystems,
             },
         ) => {
 
-            let pool = MySqlPoolOptions::new()
-                .acquire_timeout(std::time::Duration::from_secs(2))
-                .connect(url)
-                .await
-                .map_err(|source| PacsRegistryBuildError::MysqlConnect {
-                    pacs_id: config.id.clone(),
-                    source,
-                })?;
-
-            let object_provider: Arc<dyn ObjectProvider> = match object_mode {
-                PacsObjectMode::Dicomweb => Arc::new(Dcm4chee2183DicomWebObjectProvider::new(
-                    reqwest::Client::new(),
-                    wadouri.clone(),
-                )),
-
-                PacsObjectMode::Filesystem => {
-                    if filesystems.is_empty() {
-                        return Err(PacsRegistryBuildError::InvalidConfig {
+            let metadata_provider: Box<dyn MetadataProvider> = match database.r#type {
+                DatabaseType::Mysql => {
+                    let pool = MySqlPoolOptions::new()
+                        .acquire_timeout(Duration::from_secs(2))
+                        .connect(&database.url)
+                        .await
+                        .map_err(|source| PacsRegistryBuildError::MysqlConnect {
                             pacs_id: config.id.clone(),
-                            reason: "object_mode=filesystem requires at least one filesystem mapping".to_string(),
-                        });
-                    }
+                            source,
+                        })?;
 
-                    Arc::new(Dcm4chee2183FilesystemObjectProvider::new(
-                        build_filesystem_root_map(filesystems),
-                    ))
+                    Box::new(Dcm4chee2183MysqlMetadataProvider::new(pool))
+                }
+
+                DatabaseType::Postgres => {
+                    let pool = PgPoolOptions::new()
+                        .acquire_timeout(Duration::from_secs(2))
+                        .connect(&database.url)
+                        .await
+                        .map_err(|source| PacsRegistryBuildError::PostgresConnect {
+                            pacs_id: config.id.clone(),
+                            source,
+                        })?;
+
+                    Box::new(Dcm4chee2183PostgresMetadataProvider::new(pool))
                 }
             };
 
-            Ok(Arc::new(Dcm4chee2183MySqlConnector::new_with_object_provider(
+            let filesystem_roots = build_filesystem_root_map(filesystems, &config.id)?;
+            let object_provider = Box::new(Dcm4chee2183FilesystemObjectProvider::new(filesystem_roots));
+
+            Ok(Arc::new(Dcm4chee2183Connector::new(
                 config.id.clone(),
-                pool,
+                metadata_provider,
                 object_provider,
             )))
         }
 
-        // (
-        //     PacsKind::Dcm4chee440,
-        //     PacsConnectionSettings::Mysql {
-        //         url,
-        //         wadouri,
-        //     },
-        // ) => {
+        (PacsKind::Dcm4chee2183, PacsConnectionSettings::Dicomweb { dicomweb }) => {
+            let http_client = build_dicomweb_http_client(dicomweb, &config.id)?;
 
-        //     let pool =
-        //         sqlx::MySqlPool::connect(url)
-        //             .await?;
+            let metadata_provider = Box::new(
+                Dcm4chee2183DicomWebMetadataProvider::new(http_client.clone(), dicomweb.url.clone())
+            );
 
-        //     Ok(
-        //         Arc::new(
-        //             Dcm4chee440MySqlConnector::new(
-        //                 config.id.clone(),
-        //                 pool,
-        //                 wadouri.clone(),
-        //             )
-        //         )
-        //     )
-        // }
+            let object_provider = Box::new(
+                Dcm4chee2183DicomWebObjectProvider::new(http_client, dicomweb.url.clone())
+            );
 
-        // (
-        //     PacsKind::Siriuship,
-        //     PacsConnectionSettings::Rest {
-        //         url,
-        //     },
-        // ) => {
-
-        //     let client =
-        //         reqwest::Client::new();
-
-        //     Ok(
-        //         Arc::new(
-        //             SiriusHipConnector::new(
-        //                 config.id.clone(),
-        //                 client,
-        //                 url.clone(),
-        //             )
-        //         )
-        //     )
-        // }
-
-        _ => {
-            Err(PacsRegistryBuildError::UnsupportedConfig {
-                pacs_id: config.id.clone(),
-                kind: config.kind.clone(),
-                connection_type: config.connection.type_name().to_string(),
-            })
+            Ok(Arc::new(Dcm4chee2183Connector::new(
+                config.id.clone(),
+                metadata_provider,
+                object_provider,
+            )))
         }
+
+        _ => Err(PacsRegistryBuildError::UnsupportedConfig {
+            pacs_id: config.id.clone(),
+            kind: config.kind,
+            connection_type: config.connection.type_name().to_string(),
+        }),
     }
 }
-
-

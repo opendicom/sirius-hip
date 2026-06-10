@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::{
-    features::study_token::{entities::Study, StudySearchCriteria},
+    features::study_token::entities::Study,
     pacs::{
         DicomObject,
         Instance,
@@ -9,7 +9,7 @@ use crate::{
         InstanceSearchCriteria,
         ObjectAccessContext,
         Series,
-        SeriesSearchCriteria,
+        SeriesSearchCriteria, StudySearchCriteria,
     },
     shared::config::PacsKind,
 };

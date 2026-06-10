@@ -52,7 +52,7 @@ pub async fn run() -> Result<(), AppRunError> {
         .get_matches();
 
     
-    // -- Load settings  from configuration file ----------------------------------------------------------------- //
+    // -- Load settings from configuration file ----------------------------------------------------------------- //
     let conf_file = PathBuf::from(matches.get_one::<String>("config").unwrap());
     info!(config_file = %conf_file.display(), "Using configuration file");
     let settings = load_settings(conf_file)?;

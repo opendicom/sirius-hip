@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{features::study_token::{entities::Study, StudySearchCriteria}, pacs::PacsRegistry};
+use crate::{features::study_token::entities::Study, pacs::{PacsRegistry, StudySearchCriteria}};
 
 pub struct StudyService {
     registry: Arc<PacsRegistry>,

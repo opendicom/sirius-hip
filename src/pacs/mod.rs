@@ -15,6 +15,7 @@ pub use models::{
 	ObjectAccessContext,
 	Series,
 	SeriesSearchCriteria,
+	StudySearchCriteria,
 };
 pub use registry::PacsRegistry;
 pub use providers::{MetadataProvider, ObjectProvider};

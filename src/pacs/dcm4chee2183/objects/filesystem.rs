@@ -12,6 +12,7 @@ use crate::pacs::{
 
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct Dcm4chee2183FilesystemObjectProvider {
 	roots_by_filesystem: HashMap<i32, PathBuf>,
 }
@@ -47,6 +48,7 @@ impl Dcm4chee2183FilesystemObjectProvider {
 
 #[async_trait]
 impl ObjectProvider for Dcm4chee2183FilesystemObjectProvider {
+	
 	async fn retrieve_instance(&self, locator: &InstanceLocator) -> anyhow::Result<DicomObject> {
 		let full_path = self.resolve_instance_path(locator)?;
 
@@ -59,7 +61,7 @@ impl ObjectProvider for Dcm4chee2183FilesystemObjectProvider {
 			content_type: "application/dicom".to_string(),
 		})
 	}
-
+	
 	fn build_access_link(
 		&self,
 		locator: &InstanceLocator,
@@ -69,3 +71,4 @@ impl ObjectProvider for Dcm4chee2183FilesystemObjectProvider {
 		Ok(format!("file://{}", full_path.display()))
 	}
 }
+

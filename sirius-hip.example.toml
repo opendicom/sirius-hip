@@ -1,0 +1,125 @@
+# ---------------------------------------------------------------------------
+# -- GENERAL ----------------------------------------------------------------
+loglevel = "info,hyper=info,reqwest=info,actix_web=info"
+
+# Default limit number of records to query if not specified by `max` param in request
+max_default = 2000
+
+# Cors allowed origins
+cors_whitelist=["http://localhost:3000"]
+#cors_whitelist=["http://localhost:5001", "http://192.168.1.3:5080"]
+
+# App database connection (required)
+# Used for download sessions / one-time token persistence.
+# THIS DATABASE IS INDEPENDENT OF THE BACKEND PACS DATABASE
+# It will create the necessary tables automatically if they do not exist:
+# - HIP_download_sessions
+# - HIP_download_session_files
+# - HIP_download_session_claims
+# - HIP_one_time_tokens
+app_database_url = "mysql://pacs:pacs@localhost:3306/pacsdb"
+# Optional
+# App Database maximum connection limit
+app_database_max_connections = 20
+
+
+# ---------------------------------------------------------------------------
+# -- JWT AUTHORIZATION ------------------------------------------------------
+# JWT Authorization configuration
+# Type of JWT authorization to use
+# Options:
+# - standard:   Standard JWT authorization, only verifies the token signature audience and expiration
+# - onetime:    One time download session. This method, creates an application session in the 
+#               application database and used to track the download progress of the studies 
+#               requested with that token ensuring that these studies can be downloaded only once.
+jwt_auth = "standard" 
+jwt_secret = "secret"
+jwt_algorithm = "HS256"
+
+
+# ---------------------------------------------------------------------------
+# -- ONETIME CLEANUP --------------------------------------------------------
+# Background cleanup of OneTime persistence in the app DB (MySQL).
+# Deletes sessions/tokens only after they are safely past expiration.
+[onetime_cleanup]
+enabled = true
+# Run cleanup every N seconds
+interval_secs = 300
+# Keep data for N hours after `expires_at`
+retention_hours = 24
+# Limits per run (batched to avoid large delete bursts)
+session_batch = 200
+max_batches = 20
+token_delete_limit = 5000
+# Startup jitter to desynchronize multiple instances behind a load balancer
+initial_jitter_max_secs = 60
+
+
+
+# ========================================================================================= #
+#   PACS BACKEND CONFIGURATION                                                              #  
+# ========================================================================================= #
+#
+# This section defines the configuration for connecting to the backend PACS system(s).
+# You can define multiple PACS instances in the `pacs` array, each with its own connection settings.
+#
+#
+# [[pacs]]
+# Each PACS instance must specify:
+# - `id`: Unique identifier for the PACS instance.
+# - `kind`: Type of PACS (e.g. "dcm4chee2183", "dcm4chee440"). This can be used to apply specific connection settings or logic based on the PACS type.
+# - `aet`: The AE Title to use when connecting to the PACS.
+# - `description`: Optional human-readable description of the PACS instance.
+#
+# id = "hospital-a"
+# kind = "dcm4chee2183"
+# aet = "DCM4CHEE"
+#
+# Optional.
+# description = "PACS DCM4CHEE 2.18.3 - Hospital A"
+#
+#
+# [pacs.connection]
+# Defines how to connect to the PACS for metadata and object retrieval. Supported connection types:
+# - database_filesystem: Database + filesystem. Connect directly to the PACS database (e.g. MySQL/PostgreSQL) and retrieve DICOM files from a filesystem path.
+# - dicomweb: Use DICOMweb QIDO-RS to retrieve metadata and WADO-RS to retrieve objects from the PACS.
+#
+#
+# ===> Example configuration for database_filesystem connection:
+# type = "database_filesystem"
+#
+# [pacs.connection.database]
+# Supported database types: mysql, postgres
+# type = "mysql"
+#
+# url = "mysql://pacs:pacs@localhost:3306/pacsdb"
+# 
+# Optional settings to override DICOM keywords with specific database columns. Useful if your PACS
+# database schema does not follow standard DICOM attribute naming. `source` MUST be `table.column`.
+# metadata_overrides = [
+#   { keyword = "PatientID", source = "patient.pat_id" },
+#   { keyword = "InstitutionName", source = "study.study_custom1" },
+# ]
+#
+#
+# [[pacs.connection.filesystems]]
+# Filesystem identifier as stored in the PACS database.
+# The value must match the filesystem identifier referenced by the PACS metadata.
+#
+# id = 1
+# path = "/mnt/archive1"
+#
+# [[pacs.connection.filesystems]]
+# id = 2
+# path = "/mnt/archive2"
+#
+#
+# ===> Example configuration for dicomweb connection:
+# type = "dicomweb"
+#
+# [pacs.connection.dicomweb]
+# url = "http://localhost:18080/dicomweb"
+# 
+# Optional settings.
+# max_connections = 10
+# timeout_seconds = 30

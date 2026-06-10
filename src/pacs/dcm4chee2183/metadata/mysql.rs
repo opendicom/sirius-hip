@@ -1,18 +1,14 @@
-
-
-
 use async_trait::async_trait;
 use sqlx::{MySql, MySqlPool, QueryBuilder};
 
-use crate::{
-    features::study_token::{entities::Study, StudySearchCriteria},
-    pacs::{
-        Instance,
-        InstanceSearchCriteria,
-        MetadataProvider,
-        Series,
-        SeriesSearchCriteria,
-    },
+use crate::features::study_token::entities::Study;
+use crate::pacs::{
+    Instance, 
+    InstanceSearchCriteria, 
+    MetadataProvider, 
+    Series, 
+    SeriesSearchCriteria, 
+    StudySearchCriteria,
 };
 
 
@@ -49,6 +45,7 @@ struct InstanceRow {
 }
 
 
+#[derive(Clone)]
 pub struct Dcm4chee2183MysqlMetadataProvider {
     pool: MySqlPool,
 }
@@ -57,12 +54,11 @@ impl Dcm4chee2183MysqlMetadataProvider {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
-}
 
-
-#[async_trait]
-impl MetadataProvider for Dcm4chee2183MysqlMetadataProvider {
-    async fn search_studies(&self, criteria: &StudySearchCriteria) -> anyhow::Result<Vec<Study>> {
+    async fn search_studies_impl(
+        &self,
+        criteria: &StudySearchCriteria,
+    ) -> anyhow::Result<Vec<Study>> {
         let mut qb = QueryBuilder::<MySql>::new(
             "SELECT \
                 st.study_iuid AS study_uid, \
@@ -100,7 +96,10 @@ impl MetadataProvider for Dcm4chee2183MysqlMetadataProvider {
             .collect())
     }
 
-    async fn search_series(&self, criteria: &SeriesSearchCriteria) -> anyhow::Result<Vec<Series>> {
+    async fn search_series_impl(
+        &self,
+        criteria: &SeriesSearchCriteria,
+    ) -> anyhow::Result<Vec<Series>> {
         let mut qb = QueryBuilder::<MySql>::new(
             "SELECT \
                 st.study_iuid AS study_uid, \
@@ -144,7 +143,7 @@ impl MetadataProvider for Dcm4chee2183MysqlMetadataProvider {
             .collect())
     }
 
-    async fn search_instances(
+    async fn search_instances_impl(
         &self,
         criteria: &InstanceSearchCriteria,
     ) -> anyhow::Result<Vec<Instance>> {
@@ -201,5 +200,21 @@ impl MetadataProvider for Dcm4chee2183MysqlMetadataProvider {
             })
             .collect())
     }
+}
 
+
+#[async_trait]
+impl MetadataProvider for Dcm4chee2183MysqlMetadataProvider {
+    
+    async fn search_studies(&self, criteria: &StudySearchCriteria) -> anyhow::Result<Vec<Study>> {
+        self.search_studies_impl(criteria).await
+    }
+    
+    async fn search_series(&self, criteria: &SeriesSearchCriteria) -> anyhow::Result<Vec<Series>> {
+        self.search_series_impl(criteria).await
+    }
+    
+    async fn search_instances(&self, criteria: &InstanceSearchCriteria ) -> anyhow::Result<Vec<Instance>> {
+        self.search_instances_impl(criteria).await
+    }
 }

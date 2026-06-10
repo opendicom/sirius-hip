@@ -69,3 +69,10 @@ pub struct DicomObject {
     pub bytes: Vec<u8>,
     pub content_type: String,
 }
+
+
+#[derive(Debug, Clone, Default)]
+pub struct StudySearchCriteria {
+    pub patient_id: Option<String>,
+    pub accession_number: Option<String>,
+}

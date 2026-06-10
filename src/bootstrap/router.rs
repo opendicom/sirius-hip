@@ -5,5 +5,11 @@ pub fn build_router(cfg: &mut web::ServiceConfig) {
 
     // Configure routes for the study token feature.
     crate::features::study_token::routes(cfg);
+
+    // Configure routes for the echo feature.
+    crate::features::echo::routes(cfg);
+
+    // Configure routes for the PACS feature.
+    crate::features::pacs::routes(cfg);
     
 }

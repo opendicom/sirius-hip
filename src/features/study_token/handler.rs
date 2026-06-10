@@ -6,9 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     bootstrap::state::AppState,
-    features::study_token::{entities::Study, StudySearchCriteria},
+    features::study_token::{criteria::StudyTokenQuery, entities::Study}, pacs::StudySearchCriteria,
 };
-
 
 #[derive(Debug, Deserialize)]
 pub struct SearchStudiesQuery {
@@ -39,20 +38,19 @@ impl From<Study> for StudyResponse {
 
 pub async fn search_studies(
     state: Data<AppState>,
-    Query(query): Query<SearchStudiesQuery>,
+    Query(query): Query<StudyTokenQuery>,
 )
 -> Result<Json<Vec<StudyResponse>>, actix_web::Error>
 {
+    // Map StudyTokenQuery to StudySearchCriteria for the service layer
     let criteria =
         StudySearchCriteria {
 
-            patient_id:
-                query.patient_id,
-
-            accession_number:
-                query.accession_number,
+            patient_id: query.patient_id,
+            accession_number: query.accession_number,
         };
-
+    
+    // Call the service layer to perform the search
     let studies =
         state
             .study_service
@@ -60,6 +58,7 @@ pub async fn search_studies(
             .await
             .map_err(ErrorInternalServerError)?;
 
+    // Map the service layer results to the API response format
     Ok(
         Json(
             studies

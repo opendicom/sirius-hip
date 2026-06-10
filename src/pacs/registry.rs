@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use futures::future::try_join_all;
 
 use crate::{
-    features::study_token::{entities::Study, StudySearchCriteria},
+    features::study_token::entities::Study,
     pacs::{
         DicomObject,
         Instance,
@@ -13,7 +13,7 @@ use crate::{
         ObjectAccessContext,
         PacsConnector,
         Series,
-        SeriesSearchCriteria,
+        SeriesSearchCriteria, StudySearchCriteria,
     },
 };
 
@@ -70,9 +70,10 @@ impl PacsRegistry {
             .cloned()
             .ok_or_else(|| anyhow!("PACS backend `{pacs_id}` is not configured"))
     }
-
+    
     /// Searches for studies across all connected PACS that match the given criteria.
     pub async fn search_studies(&self, criteria: &StudySearchCriteria) -> anyhow::Result<Vec<Study>> {
+
         let chunks = try_join_all(
             self.connectors
                 .iter()
@@ -85,6 +86,7 @@ impl PacsRegistry {
 
     /// Searches for series across all connected PACS that match the given criteria.
     pub async fn search_series(&self, criteria: &SeriesSearchCriteria) -> anyhow::Result<Vec<Series>> {
+
         let chunks = try_join_all(
             self.connectors
                 .iter()
@@ -116,6 +118,7 @@ impl PacsRegistry {
         pacs_id: &str,
         locator: &InstanceLocator,
     ) -> anyhow::Result<DicomObject> {
+        
         let connector = self.connector_by_id(pacs_id)?;
         connector.retrieve_instance(locator).await
     }
@@ -127,6 +130,7 @@ impl PacsRegistry {
         locator: &InstanceLocator,
         context: &ObjectAccessContext,
     ) -> anyhow::Result<String> {
+
         let connector = self.connector_by_id(pacs_id)?;
         connector.build_access_link(locator, context)
     }
