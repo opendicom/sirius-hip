@@ -17,13 +17,13 @@ use crate::bootstrap::state::AppState;
 
 #[derive(Debug, Error)]
 pub enum AppRunError {
-    #[error(transparent)]
+    #[error("configuration error")]
     Config(#[from] ConfigError),
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Failed to build application dependencies")]
+    #[error("application build dependencies error")]
     Dependency(#[from] DependencyBuildError),
 }
 

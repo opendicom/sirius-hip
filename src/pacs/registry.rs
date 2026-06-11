@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::future::try_join_all;
 
 use crate::{
@@ -11,6 +10,7 @@ use crate::{
         InstanceLocator,
         InstanceSearchCriteria,
         ObjectAccessContext,
+        PacsConnectorError,
         PacsConnector,
         Series,
         SeriesSearchCriteria, StudySearchCriteria,
@@ -68,7 +68,10 @@ impl PacsRegistry {
             .iter()
             .find(|connector| connector.id() == pacs_id)
             .cloned()
-            .ok_or_else(|| anyhow!("PACS backend `{pacs_id}` is not configured"))
+            .ok_or_else(|| PacsConnectorError::BackendNotConfigured {
+                pacs_id: pacs_id.to_string(),
+            })
+            .map_err(anyhow::Error::from)
     }
     
     /// Searches for studies across all connected PACS that match the given criteria.
@@ -120,7 +123,7 @@ impl PacsRegistry {
     ) -> anyhow::Result<DicomObject> {
         
         let connector = self.connector_by_id(pacs_id)?;
-        connector.retrieve_instance(locator).await
+        Ok(connector.retrieve_instance(locator).await?)
     }
 
     /// Builds an access link from a specific PACS backend.
@@ -132,6 +135,6 @@ impl PacsRegistry {
     ) -> anyhow::Result<String> {
 
         let connector = self.connector_by_id(pacs_id)?;
-        connector.build_access_link(locator, context)
+        Ok(connector.build_access_link(locator, context)?)
     }
 }

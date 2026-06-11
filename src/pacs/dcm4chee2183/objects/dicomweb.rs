@@ -1,4 +1,3 @@
-use anyhow::Context;
 use async_trait::async_trait;
 use reqwest::{
 	Client,
@@ -11,18 +10,21 @@ use crate::pacs::{
 	InstanceLocator,
 	ObjectAccessContext,
 	ObjectProvider,
+	PacsConnectorError,
 };
 
 
 #[derive(Clone)]
 pub struct Dcm4chee2183DicomWebObjectProvider {
+	pacs_id: String,
 	http_client: Client,
 	base_url: String,
 }
 
 impl Dcm4chee2183DicomWebObjectProvider {
-	pub fn new(http_client: Client, base_url: String) -> Self {
+	pub fn new(pacs_id: String, http_client: Client, base_url: String) -> Self {
 		Self {
+			pacs_id,
 			http_client,
 			base_url,
 		}
@@ -32,14 +34,19 @@ impl Dcm4chee2183DicomWebObjectProvider {
 		&self,
 		locator: &InstanceLocator,
 		context: &ObjectAccessContext,
-	) -> anyhow::Result<String> {
-		let mut url = Url::parse(&self.base_url)
-			.with_context(|| format!("invalid DICOMweb URL configured: {}", self.base_url))?;
+	) -> Result<String, PacsConnectorError> {
+		let mut url = Url::parse(&self.base_url).map_err(|_| PacsConnectorError::InvalidDicomwebBaseUrl {
+			pacs_id: self.pacs_id.clone(),
+			base_url: self.base_url.clone(),
+		})?;
 
 		{
 			let mut segments = url
 				.path_segments_mut()
-				.map_err(|_| anyhow::anyhow!("invalid dicomweb base URL"))?;
+				.map_err(|_| PacsConnectorError::InvalidDicomwebBaseUrl {
+					pacs_id: self.pacs_id.clone(),
+					base_url: self.base_url.clone(),
+				})?;
 
 			segments
 				.push("studies")
@@ -66,7 +73,7 @@ impl Dcm4chee2183DicomWebObjectProvider {
 #[async_trait]
 impl ObjectProvider for Dcm4chee2183DicomWebObjectProvider {
 	
-	async fn retrieve_instance(&self, locator: &InstanceLocator) -> anyhow::Result<DicomObject> {
+	async fn retrieve_instance(&self, locator: &InstanceLocator) -> Result<DicomObject, PacsConnectorError> {
 		let context = ObjectAccessContext::default();
 		let url = self.build_access_link(locator, &context)?;
 		let accept = context
@@ -79,8 +86,16 @@ impl ObjectProvider for Dcm4chee2183DicomWebObjectProvider {
 			.get(url)
 			.header(ACCEPT, accept)
 			.send()
-			.await?
-			.error_for_status()?;
+			.await
+			.map_err(|source| PacsConnectorError::Reqwest { 
+				pacs_id: self.pacs_id.clone(),
+				source 
+			})?
+			.error_for_status()
+			.map_err(|source| PacsConnectorError::Reqwest { 
+				pacs_id: self.pacs_id.clone(),
+				source 
+			})?;
 
 		let content_type = response
 			.headers()
@@ -89,7 +104,13 @@ impl ObjectProvider for Dcm4chee2183DicomWebObjectProvider {
 			.unwrap_or("application/dicom")
 			.to_string();
 
-		let bytes = response.bytes().await?.to_vec();
+		let bytes = response.bytes()
+		.await
+		.map_err(|source| PacsConnectorError::Reqwest { 
+			pacs_id: self.pacs_id.clone(),
+			source 
+		})?
+		.to_vec();
 
 		Ok(DicomObject {
 			bytes,
@@ -101,7 +122,7 @@ impl ObjectProvider for Dcm4chee2183DicomWebObjectProvider {
 		&self,
 		locator: &InstanceLocator,
 		context: &ObjectAccessContext,
-	) -> anyhow::Result<String> {
+	) -> Result<String, PacsConnectorError> {
 		self.build_wado_rs_url(locator, context)
 	}
 }

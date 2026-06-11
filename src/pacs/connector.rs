@@ -8,6 +8,7 @@ use crate::{
         InstanceLocator,
         InstanceSearchCriteria,
         ObjectAccessContext,
+        PacsConnectorError,
         Series,
         SeriesSearchCriteria, StudySearchCriteria,
     },
@@ -73,6 +74,11 @@ pub trait PacsConnector: Send + Sync {
     /// - "orthanc110"
     fn pacs_kind(&self) -> PacsKind;
 
+
+    /// Ensures the required triggers for the dirty study mechanism are present.
+    /// If they are missing, the application will fail to start to avoid silently running without the sticky dirty signal.
+    async fn require_dirty_triggers(&self) -> Result<(), PacsConnectorError>;
+
     /// Searches studies matching the specified criteria.
     ///
     /// The connector is responsible for translating the search criteria
@@ -81,30 +87,30 @@ pub trait PacsConnector: Send + Sync {
     async fn search_studies(
         &self,
         criteria: &StudySearchCriteria,
-    ) -> anyhow::Result<Vec<Study>>;
+    ) -> Result<Vec<Study>, PacsConnectorError>;
 
     /// Searches series matching the specified criteria.
     async fn search_series(
         &self,
         criteria: &SeriesSearchCriteria,
-    ) -> anyhow::Result<Vec<Series>>;
+    ) -> Result<Vec<Series>, PacsConnectorError>;
 
     /// Searches instances matching the specified criteria.
     async fn search_instances(
         &self,
         criteria: &InstanceSearchCriteria,
-    ) -> anyhow::Result<Vec<Instance>>;
+    ) -> Result<Vec<Instance>, PacsConnectorError>;
 
     /// Retrieves the DICOM bytes for a specific SOP instance.
     async fn retrieve_instance(
         &self,
         locator: &InstanceLocator,
-    ) -> anyhow::Result<DicomObject>;
+    ) -> Result<DicomObject, PacsConnectorError>;
 
     /// Builds an access link for the provided SOP instance.
     fn build_access_link(
         &self,
         locator: &InstanceLocator,
         context: &ObjectAccessContext,
-    ) -> anyhow::Result<String>;
+    ) -> Result<String, PacsConnectorError>;
 }

@@ -9,6 +9,12 @@ use crate::{
     features::study_token::{criteria::StudyTokenQuery, entities::Study}, pacs::StudySearchCriteria,
 };
 
+
+// ----------------------------------------------------------------------------------------------------- //
+// -- API Request/Response Models 
+// ----------------------------------------------------------------------------------------------------- //
+
+/// Represents the query parameters for searching studies in the API endpoint.
 #[derive(Debug, Deserialize)]
 pub struct SearchStudiesQuery {
     pub patient_id: Option<String>,
@@ -16,6 +22,7 @@ pub struct SearchStudiesQuery {
 }
 
 
+/// Represents the response format for a study in the API endpoint.
 #[derive(Debug, Serialize)]
 pub struct StudyResponse {
     pub study_uid: String,
@@ -24,6 +31,7 @@ pub struct StudyResponse {
     pub accession_number: Option<String>,
 }
 
+/// Converts a `Study` entity from the service layer into a `StudyResponse` for the API response.
 impl From<Study> for StudyResponse {
     fn from(value: Study) -> Self {
         Self {
@@ -36,6 +44,11 @@ impl From<Study> for StudyResponse {
 }
 
 
+// ----------------------------------------------------------------------------------------------------- //
+// -- Handler 
+// ----------------------------------------------------------------------------------------------------- //
+
+/// Handler for the API endpoint to search for studies based on query parameters.
 pub async fn search_studies(
     state: Data<AppState>,
     Query(query): Query<StudyTokenQuery>,

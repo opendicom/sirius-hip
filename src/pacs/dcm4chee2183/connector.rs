@@ -11,6 +11,7 @@ use crate::pacs::{
     ObjectAccessContext, 
     ObjectProvider, 
     PacsConnector, 
+    PacsConnectorError,
     Series, 
     SeriesSearchCriteria, 
     StudySearchCriteria
@@ -48,10 +49,14 @@ impl PacsConnector for Dcm4chee2183Connector {
         PacsKind::Dcm4chee2183
     }
 
+    async fn require_dirty_triggers(&self) -> Result<(), PacsConnectorError> {
+        self.metadata_provider.require_dirty_triggers().await
+    }
+
     async fn search_studies(
         &self,
         criteria: &StudySearchCriteria,
-    ) -> anyhow::Result<Vec<Study>> {
+    ) -> Result<Vec<Study>, PacsConnectorError> {
 
         self.metadata_provider.search_studies(criteria).await
     }
@@ -59,7 +64,7 @@ impl PacsConnector for Dcm4chee2183Connector {
     async fn search_series(
         &self,
         criteria: &SeriesSearchCriteria,
-    ) -> anyhow::Result<Vec<Series>> {
+    ) -> Result<Vec<Series>, PacsConnectorError> {
 
         self.metadata_provider.search_series(criteria).await
     }
@@ -67,7 +72,7 @@ impl PacsConnector for Dcm4chee2183Connector {
     async fn search_instances(
         &self,
         criteria: &InstanceSearchCriteria,
-    ) -> anyhow::Result<Vec<Instance>> {
+    ) -> Result<Vec<Instance>, PacsConnectorError> {
         
         self.metadata_provider.search_instances(criteria).await
     }
@@ -75,7 +80,7 @@ impl PacsConnector for Dcm4chee2183Connector {
     async fn retrieve_instance(
         &self,
         locator: &InstanceLocator,
-    ) -> anyhow::Result<DicomObject> {
+    ) -> Result<DicomObject, PacsConnectorError> {
         
         self.object_provider.retrieve_instance(locator).await
     }
@@ -84,7 +89,7 @@ impl PacsConnector for Dcm4chee2183Connector {
         &self,
         locator: &InstanceLocator,
         context: &ObjectAccessContext,
-    ) -> anyhow::Result<String> {
+    ) -> Result<String, PacsConnectorError> {
 
         self.object_provider.build_access_link(locator, context)
     }

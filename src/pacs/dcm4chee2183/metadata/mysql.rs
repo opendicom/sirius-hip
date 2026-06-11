@@ -1,14 +1,9 @@
 use async_trait::async_trait;
-use sqlx::{MySql, MySqlPool, QueryBuilder};
+use sqlx::{MySql, MySqlPool, QueryBuilder, Row};
 
 use crate::features::study_token::entities::Study;
 use crate::pacs::{
-    Instance, 
-    InstanceSearchCriteria, 
-    MetadataProvider, 
-    Series, 
-    SeriesSearchCriteria, 
-    StudySearchCriteria,
+    Instance, InstanceSearchCriteria, MetadataProvider, PacsConnectorError, Series, SeriesSearchCriteria, StudySearchCriteria
 };
 
 
@@ -47,18 +42,70 @@ struct InstanceRow {
 
 #[derive(Clone)]
 pub struct Dcm4chee2183MysqlMetadataProvider {
+    pacs_id: String,
     pool: MySqlPool,
 }
 
 impl Dcm4chee2183MysqlMetadataProvider {
-    pub fn new(pool: MySqlPool) -> Self {
-        Self { pool }
+
+    pub fn new(pacs_id: String, pool: MySqlPool) -> Self {
+        Self { 
+            pacs_id,
+            pool 
+        }
     }
 
-    async fn search_studies_impl(
+    async fn require_dirty_triggers_impl(&self) -> Result<(), PacsConnectorError> {
+        let required = [
+            "hip_dirty_study_u_patient",
+            "hip_dirty_study_u_study",
+            "hip_dirty_study_u_series",
+            "hip_dirty_study_u_instance",
+        ];
+
+        let rows = sqlx::query(
+            "SELECT TRIGGER_NAME AS name \
+             FROM information_schema.triggers \
+             WHERE TRIGGER_SCHEMA = DATABASE() \
+             AND TRIGGER_NAME IN (?, ?, ?, ?)",
+        )
+        .bind(required[0])
+        .bind(required[1])
+        .bind(required[2])
+        .bind(required[3])
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| PacsConnectorError::MysqlConnect { 
+            pacs_id: self.pacs_id.clone(), 
+            source 
+        })?;
+
+        let mut present = std::collections::HashSet::with_capacity(required.len());
+        for row in rows {
+            let name: String = row.get("name");
+            present.insert(name);
+        }
+
+        let missing = required
+            .iter()
+            .filter(|t| !present.contains(**t))
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>();
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(PacsConnectorError::MissingRequiredTriggers { 
+                pacs_id: self.pacs_id.clone(),
+                missing 
+            })
+        }
+    }
+
+   async fn search_studies_impl(
         &self,
         criteria: &StudySearchCriteria,
-    ) -> anyhow::Result<Vec<Study>> {
+    ) -> Result<Vec<Study>, PacsConnectorError> {
         let mut qb = QueryBuilder::<MySql>::new(
             "SELECT \
                 st.study_iuid AS study_uid, \
@@ -83,7 +130,11 @@ impl Dcm4chee2183MysqlMetadataProvider {
         let rows = qb
             .build_query_as::<StudyRow>()
             .fetch_all(&self.pool)
-            .await?;
+            .await
+            .map_err(|source| PacsConnectorError::MysqlConnect {
+                pacs_id: self.pacs_id.clone(),
+                source,
+            })?;
 
         Ok(rows
             .into_iter()
@@ -99,7 +150,7 @@ impl Dcm4chee2183MysqlMetadataProvider {
     async fn search_series_impl(
         &self,
         criteria: &SeriesSearchCriteria,
-    ) -> anyhow::Result<Vec<Series>> {
+    ) -> Result<Vec<Series>, PacsConnectorError> {
         let mut qb = QueryBuilder::<MySql>::new(
             "SELECT \
                 st.study_iuid AS study_uid, \
@@ -130,7 +181,11 @@ impl Dcm4chee2183MysqlMetadataProvider {
         let rows = qb
             .build_query_as::<SeriesRow>()
             .fetch_all(&self.pool)
-            .await?;
+            .await
+            .map_err(|source| PacsConnectorError::MysqlConnect {
+                pacs_id: self.pacs_id.clone(),
+                source,
+            })?;
 
         Ok(rows
             .into_iter()
@@ -146,7 +201,7 @@ impl Dcm4chee2183MysqlMetadataProvider {
     async fn search_instances_impl(
         &self,
         criteria: &InstanceSearchCriteria,
-    ) -> anyhow::Result<Vec<Instance>> {
+    ) -> Result<Vec<Instance>, PacsConnectorError> {
         let mut qb = QueryBuilder::<MySql>::new(
             "SELECT \
                 st.study_iuid AS study_uid, \
@@ -183,7 +238,11 @@ impl Dcm4chee2183MysqlMetadataProvider {
         let rows = qb
             .build_query_as::<InstanceRow>()
             .fetch_all(&self.pool)
-            .await?;
+            .await
+           .map_err(|source| PacsConnectorError::MysqlConnect {
+                pacs_id: self.pacs_id.clone(),
+                source,
+            })?; 
 
         Ok(rows
             .into_iter()
@@ -205,16 +264,20 @@ impl Dcm4chee2183MysqlMetadataProvider {
 
 #[async_trait]
 impl MetadataProvider for Dcm4chee2183MysqlMetadataProvider {
+
+    async fn require_dirty_triggers(&self) -> Result<(), PacsConnectorError> {
+        self.require_dirty_triggers_impl().await
+    }
     
-    async fn search_studies(&self, criteria: &StudySearchCriteria) -> anyhow::Result<Vec<Study>> {
+    async fn search_studies(&self, criteria: &StudySearchCriteria) -> Result<Vec<Study>, PacsConnectorError> {
         self.search_studies_impl(criteria).await
     }
     
-    async fn search_series(&self, criteria: &SeriesSearchCriteria) -> anyhow::Result<Vec<Series>> {
+    async fn search_series(&self, criteria: &SeriesSearchCriteria) -> Result<Vec<Series>, PacsConnectorError> {
         self.search_series_impl(criteria).await
     }
     
-    async fn search_instances(&self, criteria: &InstanceSearchCriteria ) -> anyhow::Result<Vec<Instance>> {
+    async fn search_instances(&self, criteria: &InstanceSearchCriteria ) -> Result<Vec<Instance>, PacsConnectorError> {
         self.search_instances_impl(criteria).await
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::{bootstrap::{build_registry, pacs::PacsRegistryBuildError}, pacs::PacsRegistry, shared::config::AppSettings};
+use crate::{bootstrap::build_registry, pacs::{PacsRegistry, PacsRegistryError}, shared::config::AppSettings};
 
 
 // -- Dependency Error implementations -------------------------------------------------------------------------------------- //
@@ -9,8 +9,8 @@ use crate::{bootstrap::{build_registry, pacs::PacsRegistryBuildError}, pacs::Pac
 /// Errors that can occur during the building of application dependencies, such as the PACS registry.
 #[derive(Debug, Error)]
 pub enum DependencyBuildError {
-    #[error("Failed to build PACS registry")]
-    PacsRegistry(#[from] PacsRegistryBuildError),
+    #[error(transparent)]
+    PacsRegistry(#[from] PacsRegistryError),
 }
 
 

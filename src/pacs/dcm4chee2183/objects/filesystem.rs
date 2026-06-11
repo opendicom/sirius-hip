@@ -1,6 +1,5 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 
 use crate::pacs::{
@@ -8,36 +7,49 @@ use crate::pacs::{
 	InstanceLocator,
 	ObjectAccessContext,
 	ObjectProvider,
+	PacsConnectorError,
 };
 
 
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct Dcm4chee2183FilesystemObjectProvider {
+	pacs_id: String,
 	roots_by_filesystem: HashMap<i32, PathBuf>,
 }
 
 #[allow(dead_code)]
 impl Dcm4chee2183FilesystemObjectProvider {
-	pub fn new(roots_by_filesystem: HashMap<i32, PathBuf>) -> Self {
-		Self { roots_by_filesystem }
+	pub fn new(pacs_id: String, roots_by_filesystem: HashMap<i32, PathBuf>) -> Self {
+		Self { 
+			pacs_id,
+			roots_by_filesystem 
+		}
 	}
 
-	fn resolve_instance_path(&self, locator: &InstanceLocator) -> anyhow::Result<PathBuf> {
+	fn resolve_instance_path(&self, locator: &InstanceLocator) -> Result<PathBuf, PacsConnectorError> {
 		let filesystem_id = locator
 			.filesystem_id
-			.ok_or_else(|| anyhow!("filesystem_id is required for filesystem object retrieval"))?;
+			.ok_or(PacsConnectorError::MissingField {
+				pacs_id: self.pacs_id.clone(),
+				field: "filesystem_id",
+				operation: "retrieve_instance",
+			})?;
 
-		let root = self.roots_by_filesystem.get(&filesystem_id).ok_or_else(|| {
-			anyhow!(
-				"filesystem mapping is not configured for filesystem id {filesystem_id}"
-			)
-		})?;
+		let root = self.roots_by_filesystem.get(&filesystem_id).ok_or(
+			PacsConnectorError::FilesystemMappingMissing { 
+				pacs_id: self.pacs_id.clone(),
+				filesystem_id }
+		)?;
 
 		let relative_file_path = locator
 			.relative_file_path
 			.as_deref()
-			.ok_or_else(|| anyhow!("relative_file_path is required for filesystem retrieval"))?;
+			.ok_or(PacsConnectorError::MissingField {
+				pacs_id: self.pacs_id.clone(),
+				field: "relative_file_path",
+				operation: "retrieve_instance",
+			})?;
 
 		let relative_file_path = relative_file_path.trim_start_matches('/');
 
@@ -49,12 +61,13 @@ impl Dcm4chee2183FilesystemObjectProvider {
 #[async_trait]
 impl ObjectProvider for Dcm4chee2183FilesystemObjectProvider {
 	
-	async fn retrieve_instance(&self, locator: &InstanceLocator) -> anyhow::Result<DicomObject> {
+	async fn retrieve_instance(&self, locator: &InstanceLocator) -> Result<DicomObject, PacsConnectorError> {
 		let full_path = self.resolve_instance_path(locator)?;
 
-		let bytes = tokio::fs::read(&full_path)
-			.await
-			.with_context(|| format!("failed to read DICOM file at {}", full_path.display()))?;
+		let bytes = tokio::fs::read(&full_path).await.map_err(|source| PacsConnectorError::Io {
+			pacs_id: self.pacs_id.clone(),
+			source,
+		})?;
 
 		Ok(DicomObject {
 			bytes,
@@ -66,7 +79,7 @@ impl ObjectProvider for Dcm4chee2183FilesystemObjectProvider {
 		&self,
 		locator: &InstanceLocator,
 		_context: &ObjectAccessContext,
-	) -> anyhow::Result<String> {
+	) -> Result<String, PacsConnectorError> {
 		let full_path = self.resolve_instance_path(locator)?;
 		Ok(format!("file://{}", full_path.display()))
 	}
